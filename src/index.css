@@ -1,0 +1,41 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700&family=Caveat:wght@400;700&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Playfair Display", "Cinzel", Georgia, serif;
+  --font-artistic: "Cinzel", serif;
+  --font-handwriting: "Caveat", cursive;
+}
+
+@keyframes blink-orange {
+  0%, 100% {
+    color: #f97316;
+    text-shadow: 0 0 4px rgba(249, 115, 22, 0.4);
+  }
+  50% {
+    color: #ea580c;
+    text-shadow: 0 0 12px rgba(234, 88, 12, 0.8);
+    opacity: 0.7;
+  }
+}
+
+.animate-blink-orange {
+  animation: blink-orange 0.8s infinite alternate ease-in-out;
+}
+
+@keyframes blink-yellow-orange {
+  0%, 100% {
+    color: #facc15; /* yellow-400 */
+    text-shadow: 0 0 4px rgba(250, 204, 21, 0.4);
+  }
+  50% {
+    color: #f97316; /* orange-500 */
+    text-shadow: 0 0 12px rgba(249, 115, 22, 0.8);
+  }
+}
+
+.animate-blink-yellow-orange {
+  animation: blink-yellow-orange 1s infinite alternate ease-in-out;
+  display: inline-block;
+}

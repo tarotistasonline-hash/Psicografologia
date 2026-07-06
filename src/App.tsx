@@ -45,6 +45,7 @@ import GuidedAssessment from "./components/GuidedAssessment";
 import VibrantBackground from "./components/VibrantBackground";
 import { AnalysisReportData, GuidedAnswers } from "./types";
 import { generatePDF } from "./lib/pdfGenerator";
+import BlogSection from "./components/BlogSection";
 
 // Static mock preset samples for rapid discovery and testing without API key setup
 const PRESET_SAMPLES: Record<string, { es: AnalysisReportData; pt: AnalysisReportData; en: AnalysisReportData }> = {
@@ -319,6 +320,7 @@ const PRESET_SAMPLES: Record<string, { es: AnalysisReportData; pt: AnalysisRepor
 
 export default function App() {
   const [language, setLanguage] = useState<"es" | "pt" | "en">("es");
+  const [mainView, setMainView] = useState<"analyzer" | "blog">("analyzer");
   const [activeTab, setActiveTab] = useState<"canvas" | "upload" | "guided">("canvas");
   
   // Inputs
@@ -410,7 +412,7 @@ export default function App() {
       btnAnalyzing: "✨ Analizando tu letra...",
       btnNoSampleError: "Por favor, dibujá en el lienzo o subí una imagen antes de analizar.",
       
-      resultsTitle: "⚡ ¡Tus Resultados de Personalidad!",
+      resultsTitle: "⚡ ¡Tu Informe!",
       resultsSub: "Descubrí lo que tus trazos dicen de tu forma de ser, tus energías y tus superpoderes ocultos.",
       
       cardProfileTitle: "📝 Quién sos realmente (Tu Perfil)",
@@ -709,41 +711,71 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Globe className="w-4 h-4 text-indigo-500 shrink-0 hidden sm:block" />
-            <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-1 rounded-xl text-xs font-bold gap-1 border border-slate-200/40 dark:border-slate-800">
+          {/* Centered navigation menu for mobile and desktop */}
+          <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl text-xs font-bold border border-slate-200/40 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setMainView("analyzer")}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                mainView === "analyzer"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
+              }`}
+            >
+              {language === "es" ? "Analizador" : language === "pt" ? "Analisador" : "Analyzer"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMainView("blog")}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1 sm:gap-1.5 ${
+                mainView === "blog"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5 text-indigo-500 group-hover:text-white" />
+              {language === "es" ? "Blog" : language === "pt" ? "Blog" : "Blog"}
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1 sm:gap-2">
+            <Globe className="w-4 h-4 text-indigo-500 shrink-0 hidden md:block" />
+            <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-1 rounded-xl text-[11px] sm:text-xs font-bold gap-0.5 sm:gap-1 border border-slate-200/40 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => changeLanguage("es")}
-                className={`px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                className={`px-2 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
                   language === "es"
                     ? "bg-indigo-600 text-white shadow-sm"
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
                 }`}
               >
-                Español
+                <span className="hidden sm:inline">Español</span>
+                <span className="inline sm:hidden">ES</span>
               </button>
               <button
                 type="button"
                 onClick={() => changeLanguage("pt")}
-                className={`px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                className={`px-2 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
                   language === "pt"
                     ? "bg-indigo-600 text-white shadow-sm"
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
                 }`}
               >
-                Português
+                <span className="hidden sm:inline">Português</span>
+                <span className="inline sm:hidden">PT</span>
               </button>
               <button
                 type="button"
                 onClick={() => changeLanguage("en")}
-                className={`px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                className={`px-2 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
                   language === "en"
                     ? "bg-indigo-600 text-white shadow-sm"
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
                 }`}
               >
-                English
+                <span className="hidden sm:inline">English</span>
+                <span className="inline sm:hidden">EN</span>
               </button>
             </div>
           </div>
@@ -751,10 +783,42 @@ export default function App() {
       </header>
 
       {/* Main Body */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col gap-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col gap-6">
         
-        {/* Welcome Section */}
-        <section className="text-center max-w-3xl mx-auto mt-2" id="hero-welcome">
+        {/* Navigation Tabs for mobile/desktop to switch views */}
+        <div className="flex justify-center -mb-2">
+          <div className="flex bg-white dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs max-w-sm w-full grid grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setMainView("analyzer")}
+              className={`py-2 px-3 text-xs font-black rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
+                mainView === "analyzer"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+            >
+              <Brain className="w-3.5 h-3.5" />
+              {language === "es" ? "Analizador" : language === "pt" ? "Analisador" : "Analyzer"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMainView("blog")}
+              className={`py-2 px-3 text-xs font-black rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
+                mainView === "blog"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              {language === "es" ? "Blog" : language === "pt" ? "Blog" : "Blog"}
+            </button>
+          </div>
+        </div>
+
+        {mainView === "analyzer" && (
+          <>
+            {/* Welcome Section */}
+            <section className="text-center max-w-3xl mx-auto mt-2" id="hero-welcome">
           <span className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-1 rounded-full mb-3 border border-indigo-100 dark:border-indigo-900">
             <Sparkles className="w-3.5 h-3.5" />
             {language === "es" ? "🎉 ¡Test de Personalidad Grafológica Divertido!" : language === "pt" ? "Psicologia Científica & Perícia Grafotécnica" : "Scientific Handwriting Analysis & Personality Profiling"}
@@ -762,7 +826,7 @@ export default function App() {
           <h2 className="text-3xl sm:text-4xl font-sans font-black text-slate-900 dark:text-white tracking-tight leading-tight">
             {language === "es" ? (
               <span className="inline-flex items-center gap-2 justify-center flex-wrap">
-                <span className="animate-blink-yellow-orange">Qué dice tu letra y/o firma sobre tu personalidad</span>
+                <span className="animate-blink-yellow-orange">Qué revela tu letra acerca de tu personalidad</span>
               </span>
             ) : language === "pt" ? (
               "Sua Caligrafia Revela Quem Você É"
@@ -773,6 +837,22 @@ export default function App() {
           <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 mt-3 leading-relaxed">
             {t.appSub}
           </p>
+          <div className="mt-4.5 flex justify-center">
+            <button
+              onClick={() => setMainView("blog")}
+              className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50/80 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 px-4.5 py-2.5 rounded-2xl border border-indigo-200/60 dark:border-indigo-800/80 cursor-pointer transition-all shadow-xs group"
+            >
+              <BookOpen className="w-4 h-4 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform" />
+              <span>
+                {language === "es"
+                  ? "📚 ¡Nuevo! Visitá nuestro Blog de Grafología Científica"
+                  : language === "pt"
+                  ? "📚 Novo! Visite o nosso Blog de Grafologia Científica"
+                  : "📚 New! Visit our Scientific Graphology Blog"}
+              </span>
+              <ChevronRight className="w-3.5 h-3.5 text-indigo-500 group-hover:translate-x-1 transition-transform" />
+            </button>
+          </div>
         </section>
 
         {/* Action Panel Container */}
@@ -1489,6 +1569,12 @@ export default function App() {
           </div>
 
         </div>
+        </>
+        )}
+
+        {mainView === "blog" && (
+          <BlogSection language={language} />
+        )}
 
       </main>
 

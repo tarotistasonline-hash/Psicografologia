@@ -34,6 +34,17 @@ function getGeminiClient() {
   return aiClient;
 }
 
+// Serve ads.txt and app-ads.txt for Google AdSense and AdMob crawler authorization
+app.get("/ads.txt", (req, res) => {
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.send("google.com, pub-8099027931324700, DIRECT, f08c47fec0942fa0");
+});
+
+app.get("/app-ads.txt", (req, res) => {
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.send("google.com, pub-8099027931324700, DIRECT, f08c47fec0942fa0");
+});
+
 // REST API endpoint to analyze handwriting
 app.post("/api/analyze", async (req, res) => {
   try {    const { image, description, language = "es" } = req.body;

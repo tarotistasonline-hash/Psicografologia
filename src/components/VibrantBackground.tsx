@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 
 export default function VibrantBackground() {
   return (
-    <div className="fixed inset-0 -z-50 overflow-hidden pointer-events-none select-none bg-slate-50 dark:bg-slate-950 transition-colors duration-500">
+    <div className="fixed inset-0 -z-50 overflow-hidden pointer-events-none select-none bg-slate-50 dark:bg-slate-950 transition-colors duration-500 print:hidden">
       {/* Dynamic light glows for light mode / richer neon glows for dark mode */}
       
       {/* Orb 1: Indigo/Purple */}

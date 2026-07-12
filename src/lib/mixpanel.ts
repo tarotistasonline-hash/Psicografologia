@@ -3,7 +3,7 @@ import mixpanel from "mixpanel-browser";
 // Check environment variable or fallback to localStorage custom token entered in UI
 const getStoredToken = () => {
   if (typeof window === "undefined") return "";
-  const envToken = (import.meta as any).env.VITE_MIXPANEL_TOKEN;
+  const envToken = (import.meta as any).env?.VITE_MIXPANEL_TOKEN;
   if (envToken && envToken.trim() !== "") {
     return envToken.trim();
   }
@@ -45,7 +45,7 @@ export const getLocalEventLog = () => [...localEventLog];
  */
 const getMixpanel = () => {
   if (typeof window === "undefined") return null;
-  let mp: any = mixpanel;
+  let mp: any = (window as any).mixpanel || mixpanel;
   if (mp && mp.default) {
     mp = mp.default;
   }
@@ -78,7 +78,7 @@ export const initMixpanel = (customToken?: string) => {
 
     if (activeToken && activeToken.trim() !== "") {
       mp.init(activeToken, {
-        debug: (import.meta as any).env.DEV,
+        debug: (import.meta as any).env?.DEV || false,
         track_pageview: true,
         persistence: "localStorage",
       });
@@ -132,6 +132,20 @@ export const trackEvent = (eventName: string, properties?: Record<string, any>) 
       console.error(e);
     }
   });
+
+  // Also track inside the free, integrated server-side database
+  try {
+    fetch("/api/metrics/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: eventName, properties: properties || {} })
+    }).catch(err => {
+      // Use console.warn/debug for non-blocking telemetry tracking failures to avoid triggering error monitors
+      console.warn("[Metrics Track Warning] Telemetry event not saved on server (non-blocking):", err.message || err);
+    });
+  } catch (e) {
+    // ignore
+  }
 
   try {
     if (isInitialized) {

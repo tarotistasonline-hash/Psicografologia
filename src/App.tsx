@@ -21,13 +21,18 @@ import {
   Briefcase,
   FileDown,
   Heart,
+  Coffee,
   Settings,
   DollarSign,
   Eye,
   Code,
   Copy,
   Layout,
-  BarChart2
+  BarChart2,
+  Instagram,
+  Linkedin,
+  Facebook,
+  Printer
 } from "lucide-react";
 import { 
   ResponsiveContainer, 
@@ -53,8 +58,9 @@ import VibrantBackground from "./components/VibrantBackground";
 import { AnalysisReportData, GuidedAnswers } from "./types";
 import { generatePDF } from "./lib/pdfGenerator";
 import BlogSection from "./components/BlogSection";
-import { trackEvent } from "./lib/mixpanel";
+import { trackEvent, isMixpanelActive } from "./lib/mixpanel";
 import MixpanelDashboard from "./components/MixpanelDashboard";
+import { motion } from "motion/react";
 
 // Static mock preset samples for rapid discovery and testing without API key setup
 const PRESET_SAMPLES: Record<string, { es: AnalysisReportData; pt: AnalysisReportData; en: AnalysisReportData }> = {
@@ -325,6 +331,30 @@ const PRESET_SAMPLES: Record<string, { es: AnalysisReportData; pt: AnalysisRepor
       careerRecommendations: ["Graphic Design, Fashion, or Web Design", "Visual Arts, Music, or Creative Writing", "Marketing, Advertising, and Branding", "Architecture and Interior Design"]
     }
   }
+};
+
+// Framer Motion variants for smooth staggered entrance of the results blocks
+const reportContainerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.12,
+    },
+  },
+};
+
+const reportItemVariants = {
+  hidden: { opacity: 0, y: 24 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      type: "spring",
+      stiffness: 110,
+      damping: 15,
+    },
+  },
 };
 
 export default function App() {
@@ -708,7 +738,12 @@ export default function App() {
 
       const data: AnalysisReportData = await response.json();
       setReport(data);
-      trackEvent("Analysis Success", { method: activeTab, language });
+      trackEvent("Analysis Success", { 
+        method: activeTab, 
+        language,
+        temperament: data.temperament,
+        traits: data.coreTraits.map(t => ({ trait: t.trait, level: t.level }))
+      });
     } catch (err: any) {
       console.error(err);
       const errMsg = err.message || "Não foi possível conectar ao servidor de análise. Verifique sua chave API do Gemini nas configurações.";
@@ -750,18 +785,35 @@ export default function App() {
       <VibrantBackground />
       
       {/* Dynamic Header */}
-      <header className="sticky top-0 z-40 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800" id="main-header">
+      <header className="sticky top-0 z-40 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 print:hidden" id="main-header">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="p-2 bg-indigo-600 rounded-xl text-white shadow-md shadow-indigo-600/10">
               <Brain className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5">
+              <h1 className="text-lg font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5 flex-wrap">
                 {t.appName}
                 <span className="text-[10px] uppercase font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 px-1.5 py-0.5 rounded-sm">
                   v3.5
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setMainView("mixpanel")}
+                  className={`text-[9px] uppercase font-bold px-2 py-0.5 rounded-full flex items-center gap-1 transition-all hover:scale-105 cursor-pointer ${
+                    isMixpanelActive()
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                      : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
+                  }`}
+                  title={
+                    isMixpanelActive()
+                      ? "Mixpanel está Conectado y Activo. Hacé clic para ver el panel de métricas."
+                      : "Mixpanel en Modo Simulación. Hacé clic para conectar tu token real gratis."
+                  }
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${isMixpanelActive() ? "bg-emerald-500 animate-pulse" : "bg-indigo-500 animate-pulse"}`}></span>
+                  <span>Mixpanel: {isMixpanelActive() ? "Active" : "Simulated"}</span>
+                </button>
               </h1>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
                 {t.appSlogan}
@@ -883,8 +935,39 @@ export default function App() {
 
         {mainView === "analyzer" && (
           <>
+            {/* Real-time Tracking Notice */}
+            <div className="max-w-3xl mx-auto w-full mb-3 print:hidden">
+              <div className="bg-linear-to-r from-indigo-500/10 via-purple-500/10 to-pink-500/10 dark:from-indigo-950/25 dark:via-purple-950/25 dark:to-pink-950/25 p-3.5 rounded-2xl border border-indigo-200/50 dark:border-indigo-900/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  <span className="p-2 bg-indigo-600 text-white rounded-xl shrink-0">
+                    <BarChart2 className="w-4 h-4 animate-pulse" />
+                  </span>
+                  <div className="text-left">
+                    <p className="font-extrabold text-slate-800 dark:text-white flex items-center gap-1.5">
+                      <span>{language === "es" ? "📊 ¡Métricas Mixpanel Integradas!" : language === "pt" ? "📊 Métricas do Mixpanel Integradas!" : "📊 Integrated Mixpanel Metrics!"}</span>
+                      <span className="text-[8px] uppercase font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-1 rounded-sm">LIVE</span>
+                    </p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                      {language === "es" 
+                        ? "Hacé clic para ver embudos de conversión, rasgos analizados en vivo y telemetría de esta sesión." 
+                        : language === "pt" 
+                        ? "Clique para ver funis de conversão, traços analisados ao vivo e telemetria desta sessão." 
+                        : "Click to inspect conversion funnels, real-time handwriting traits distribution, and live telemetry stream."}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMainView("mixpanel")}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-black rounded-xl text-[10px] tracking-wider uppercase transition-all shrink-0 cursor-pointer shadow-md shadow-indigo-600/15"
+                >
+                  {language === "es" ? "Ver Dashboard" : language === "pt" ? "Ver Dashboard" : "Open Dashboard"}
+                </button>
+              </div>
+            </div>
+
             {/* Welcome Section */}
-            <section className="text-center max-w-3xl mx-auto mt-2" id="hero-welcome">
+            <section className="text-center max-w-3xl mx-auto mt-2 print:hidden" id="hero-welcome">
           <span className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-1 rounded-full mb-3 border border-indigo-100 dark:border-indigo-900">
             <Sparkles className="w-3.5 h-3.5" />
             {language === "es" ? "🎉 ¡Test de Personalidad Grafológica Divertido!" : language === "pt" ? "Psicologia Científica & Perícia Grafotécnica" : "Scientific Handwriting Analysis & Personality Profiling"}
@@ -924,10 +1007,10 @@ export default function App() {
         <AdSenseBanner slot="header-top-banner" className="max-w-3xl mx-auto mt-2" />
 
         {/* Action Panel Container */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start mt-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start mt-4 print:block print:w-full print:mt-0">
           
           {/* LEFT: Input Methods (5 cols on large screens) */}
-          <div className="lg:col-span-5 flex flex-col gap-6" id="input-column">
+          <div className="lg:col-span-5 flex flex-col gap-6 print:hidden" id="input-column">
             
             {/* Writing Instructions Guide */}
             <div className="bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm flex flex-col gap-3.5 relative overflow-hidden group/instr">
@@ -1305,7 +1388,7 @@ export default function App() {
             </div>
 
             {/* RIGHT: Visual Reports with Recharts (7 cols) */}
-            <div className="lg:col-span-7 flex flex-col gap-6" id="report-column">
+            <div className="lg:col-span-7 flex flex-col gap-6 print:w-full print:p-0 print:border-none" id="report-column">
             
             {/* Header Info */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200/80 dark:border-slate-800 pb-3">
@@ -1319,7 +1402,7 @@ export default function App() {
                 </p>
               </div>
               
-              <div className="flex items-center gap-3 self-start sm:self-auto flex-wrap">
+              <div className="flex items-center gap-3 self-start sm:self-auto flex-wrap print:hidden">
                 {selectedPreset && (
                   <span className="text-[11px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 px-2.5 py-1 rounded-md border border-amber-200/50 dark:border-amber-900/30">
                     {language === "es" ? "Visualizando Muestra" : language === "pt" ? "Visualizando Amostra" : "Viewing Sample Profile"}
@@ -1327,37 +1410,60 @@ export default function App() {
                 )}
                 
                 {report && (
-                  <button
-                    onClick={() => {
-                      const getPresetLabel = () => {
-                        if (selectedPreset === "leader") {
-                          return language === "es" ? "Perfil Líder Determinado" : language === "pt" ? "Perfil Líder Determinado" : "Driven Leader Profile";
-                        } else if (selectedPreset === "thinker") {
-                          return language === "es" ? "Perfil Pensador Analítico" : language === "pt" ? "Perfil Pensador Analítico" : "Analytical Thinker Profile";
-                        } else if (selectedPreset === "artist") {
-                          return language === "es" ? "Perfil Artista Creativo" : language === "pt" ? "Perfil Artista Criativo" : "Creative Artist Profile";
-                        }
-                        return language === "es" ? "Muestra Personalizada" : language === "pt" ? "Amostra Personalizada" : "Custom Handwriting Sample";
-                      };
-                      const presetLabel = getPresetLabel();
-                      generatePDF(report, language, presetLabel);
-                      trackEvent("PDF Downloaded", { preset: selectedPreset || "custom", presetLabel, language });
-                    }}
-                    className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/15 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
-                    id="download-laudo-btn"
-                  >
-                    <FileDown className="w-4 h-4 animate-pulse" />
-                    <span>{language === "es" ? "Descargar Informe" : language === "pt" ? "Download do Laudo" : "Download Report"}</span>
-                  </button>
+                  <>
+                    <button
+                      onClick={() => {
+                        const getPresetLabel = () => {
+                          if (selectedPreset === "leader") {
+                            return language === "es" ? "Perfil Líder Determinado" : language === "pt" ? "Perfil Líder Determinado" : "Driven Leader Profile";
+                          } else if (selectedPreset === "thinker") {
+                            return language === "es" ? "Perfil Pensador Analítico" : language === "pt" ? "Perfil Pensador Analítico" : "Analytical Thinker Profile";
+                          } else if (selectedPreset === "artist") {
+                            return language === "es" ? "Perfil Artista Creativo" : language === "pt" ? "Perfil Artista Criativo" : "Creative Artist Profile";
+                          }
+                          return language === "es" ? "Muestra Personalizada" : language === "pt" ? "Amostra Personalizada" : "Custom Handwriting Sample";
+                        };
+                        const presetLabel = getPresetLabel();
+                        generatePDF(report, language, presetLabel);
+                        trackEvent("PDF Downloaded", { preset: selectedPreset || "custom", presetLabel, language });
+                      }}
+                      className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/15 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+                      id="download-laudo-btn"
+                    >
+                      <FileDown className="w-4 h-4 animate-pulse" />
+                      <span>{language === "es" ? "Descargar Informe" : language === "pt" ? "Download do Laudo" : "Download Report"}</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        trackEvent("Report Printed", { preset: selectedPreset || "custom", language });
+                        window.print();
+                      }}
+                      className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold transition-all border border-slate-200/80 dark:border-slate-800 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+                      id="print-laudo-btn"
+                    >
+                      <Printer className="w-4 h-4 text-indigo-500" />
+                      <span>{language === "es" ? "Imprimir" : language === "pt" ? "Imprimir" : "Print"}</span>
+                    </button>
+                  </>
                 )}
               </div>
             </div>
 
             {report ? (
-              <div className="flex flex-col gap-6">
+              <motion.div 
+                className="flex flex-col gap-6"
+                variants={reportContainerVariants}
+                initial="hidden"
+                animate="visible"
+                key={report.psychologicalProfile.substring(0, 30)}
+              >
 
                 {/* Synthesis profile block */}
-                <div className="bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+                <motion.div 
+                  variants={reportItemVariants}
+                  className="bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs"
+                >
                   <div className="flex items-center gap-2 mb-3">
                     <FileHeart className="w-5 h-5 text-indigo-500" />
                     <h4 className="text-sm font-extrabold text-slate-950 dark:text-white">
@@ -1367,10 +1473,13 @@ export default function App() {
                   <div className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line bg-slate-50/50 dark:bg-slate-950/60 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
                     {report.psychologicalProfile}
                   </div>
-                </div>
+                </motion.div>
 
                 {/* RECHARTS TRAIT DISTRIBUTION BENTO GRID SECTION */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <motion.div 
+                  variants={reportItemVariants}
+                  className="grid grid-cols-1 md:grid-cols-2 gap-6"
+                >
                   
                   {/* Temperament Pie/Donut Chart */}
                   <div className="bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col justify-between min-h-[360px]">
@@ -1462,10 +1571,13 @@ export default function App() {
                     </p>
                   </div>
 
-                </div>
+                </motion.div>
 
                 {/* Detailed Traits Table/Grid explaining what was found in the caligraphy */}
-                <div className="bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+                <motion.div 
+                  variants={reportItemVariants}
+                  className="bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs"
+                >
                   <div className="mb-4">
                     <h4 className="text-sm font-extrabold text-slate-950 dark:text-white flex items-center gap-1.5">
                       <BookOpen className="w-4 h-4 text-indigo-500" />
@@ -1496,10 +1608,13 @@ export default function App() {
                       </tbody>
                     </table>
                   </div>
-                </div>
+                </motion.div>
 
                 {/* Emotional State Indicators Section with Recharts */}
-                <div className="bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+                <motion.div 
+                  variants={reportItemVariants}
+                  className="bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs"
+                >
                   <div className="mb-4">
                     <h4 className="text-sm font-extrabold text-slate-950 dark:text-white flex items-center gap-1.5">
                       <Activity className="w-4 h-4 text-indigo-500" />
@@ -1587,10 +1702,13 @@ export default function App() {
                     </div>
 
                   </div>
-                </div>
+                </motion.div>
 
                 {/* Strengths & Challenges layout */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <motion.div 
+                  variants={reportItemVariants}
+                  className="grid grid-cols-1 md:grid-cols-2 gap-6"
+                >
                   
                   {/* Strengths Column */}
                   <div className="bg-emerald-50/20 dark:bg-emerald-950/5 p-5 rounded-2xl border border-emerald-100 dark:border-emerald-950/40">
@@ -1674,10 +1792,13 @@ export default function App() {
                     </ul>
                   </div>
 
-                </div>
+                </motion.div>
 
                 {/* Career recommendation list */}
-                <div className="bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs">
+                <motion.div 
+                  variants={reportItemVariants}
+                  className="bg-white dark:bg-slate-900/60 p-5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs"
+                >
                   <div className="flex items-center gap-2 mb-4">
                     <Briefcase className="w-5 h-5 text-indigo-500" />
                     <h4 className="text-sm font-extrabold text-slate-950 dark:text-white">
@@ -1698,11 +1819,11 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-                </div>
+                </motion.div>
 
                 <AdSenseBanner slot="results-bottom-banner" className="mt-6" />
 
-              </div>
+              </motion.div>
             ) : (
               <div className="bg-white dark:bg-slate-900/60 p-8 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs flex flex-col items-center text-center justify-center py-20">
                 <FileHeart className="w-12 h-12 text-slate-300 dark:text-slate-700 animate-pulse" />
@@ -1774,21 +1895,21 @@ export default function App() {
             href="https://mpago.la/2m7bcUT"
             target="_blank"
             rel="noopener noreferrer"
-            className="group/don bg-indigo-50/60 dark:bg-indigo-950/20 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-all duration-300 px-5 py-3 rounded-2xl border border-indigo-100/60 dark:border-indigo-900/40 flex items-center justify-between gap-3 shadow-xs cursor-pointer"
+            className="group/don bg-amber-50/50 dark:bg-amber-950/10 hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-all duration-300 px-5 py-3 rounded-2xl border border-amber-200/50 dark:border-amber-900/30 flex items-center justify-between gap-3 shadow-xs cursor-pointer"
           >
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-indigo-100/80 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 rounded-xl group-hover/don:scale-110 transition-transform duration-300">
-                <Heart className="w-4 h-4 fill-indigo-600 dark:fill-indigo-400 animate-pulse" />
+              <div className="p-2 bg-amber-100/80 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-xl group-hover/don:scale-110 transition-transform duration-300">
+                <Coffee className="w-4 h-4 fill-amber-600 dark:fill-amber-400 animate-bounce" />
               </div>
               <div className="text-left">
                 <p className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-tight">
                   {language === "es" 
-                    ? "Si te gustó la app, invítame con un cafecito" 
+                    ? "Invítame con un cafecito, que está haciendo mucho frío 🤭" 
                     : language === "pt" 
-                    ? "Se gostou do app, me apoie com um café" 
-                    : "If you liked the app, buy me a coffee"}
+                    ? "Me convide para um cafézinho, pois está fazendo muito frio 🤭" 
+                    : "Invite me for a warm coffee, it's getting really cold out there! 🤭"}
                 </p>
-                <p className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold mt-0.5 group-hover/don:underline flex items-center gap-1">
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold mt-0.5 group-hover/don:underline flex items-center gap-1">
                   {language === "es" 
                     ? "Hacé clic acá para colaborar" 
                     : language === "pt" 
@@ -1798,19 +1919,57 @@ export default function App() {
                 </p>
               </div>
             </div>
-            <span className="text-lg">❤️</span>
+            <span className="text-xl animate-pulse">☕</span>
           </a>
         </div>
       </div>
 
       {/* Modern footer with branding rules */}
-      <footer className="w-full bg-slate-100 dark:bg-slate-950 border-t border-slate-200/80 dark:border-slate-900/80 mt-12 py-6 text-center text-xs text-slate-500 dark:text-slate-400" id="main-footer">
-        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <p>© 2026 GraphoStudio — {language === "pt" ? "Psicologia Baseada em Evidências" : "Evidence-Based Psychographology"}</p>
-          <div className="flex gap-4">
-            <a href="#" className="hover:underline">{language === "pt" ? "Sobre a Grafologia" : "About Graphology"}</a>
-            <a href="#" className="hover:underline">{language === "pt" ? "Termos de Uso" : "Terms of Service"}</a>
-            <a href="#" className="hover:underline">{language === "pt" ? "Privacidade" : "Privacy Policy"}</a>
+      <footer className="w-full bg-slate-100 dark:bg-slate-950 border-t border-slate-200/80 dark:border-slate-900/80 mt-12 py-8 text-xs text-slate-500 dark:text-slate-400 print:hidden" id="main-footer">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="text-center md:text-left">
+            <p>© 2026 GraphoStudio — {language === "pt" ? "Psicologia Baseada em Evidências" : "Evidence-Based Psychographology"}</p>
+            <div className="flex justify-center md:justify-start gap-4 mt-2">
+              <a href="#" className="hover:underline hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">{language === "pt" ? "Sobre a Grafologia" : "About Graphology"}</a>
+              <a href="#" className="hover:underline hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">{language === "pt" ? "Termos de Uso" : "Terms of Service"}</a>
+              <a href="#" className="hover:underline hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">{language === "pt" ? "Privacidade" : "Privacy Policy"}</a>
+            </div>
+          </div>
+
+          {/* Social Media section */}
+          <div className="flex flex-col items-center md:items-end gap-2">
+            <span className="font-bold tracking-wider uppercase text-[10px] text-slate-400 dark:text-slate-500">
+              {language === "es" ? "Comunidad & Redes" : language === "pt" ? "Comunidade & Redes" : "Community & Socials"}
+            </span>
+            <div className="flex items-center gap-3">
+              <a 
+                href="https://instagram.com" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                aria-label="Instagram"
+                className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-pink-600 dark:hover:text-pink-400 hover:border-pink-200 dark:hover:border-pink-900/50 hover:scale-105 active:scale-95 transition-all shadow-xs cursor-pointer"
+              >
+                <Instagram className="w-4.5 h-4.5" />
+              </a>
+              <a 
+                href="https://linkedin.com" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                aria-label="LinkedIn"
+                className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:border-indigo-200 dark:hover:border-indigo-900/50 hover:scale-105 active:scale-95 transition-all shadow-xs cursor-pointer"
+              >
+                <Linkedin className="w-4.5 h-4.5" />
+              </a>
+              <a 
+                href="https://facebook.com" 
+                target="_blank" 
+                rel="noopener noreferrer" 
+                aria-label="Facebook"
+                className="p-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-200 dark:hover:border-blue-900/50 hover:scale-105 active:scale-95 transition-all shadow-xs cursor-pointer"
+              >
+                <Facebook className="w-4.5 h-4.5" />
+              </a>
+            </div>
           </div>
         </div>
       </footer>

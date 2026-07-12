@@ -26,7 +26,8 @@ import {
   Eye,
   Code,
   Copy,
-  Layout
+  Layout,
+  BarChart2
 } from "lucide-react";
 import { 
   ResponsiveContainer, 
@@ -52,6 +53,8 @@ import VibrantBackground from "./components/VibrantBackground";
 import { AnalysisReportData, GuidedAnswers } from "./types";
 import { generatePDF } from "./lib/pdfGenerator";
 import BlogSection from "./components/BlogSection";
+import { trackEvent } from "./lib/mixpanel";
+import MixpanelDashboard from "./components/MixpanelDashboard";
 
 // Static mock preset samples for rapid discovery and testing without API key setup
 const PRESET_SAMPLES: Record<string, { es: AnalysisReportData; pt: AnalysisReportData; en: AnalysisReportData }> = {
@@ -325,40 +328,28 @@ const PRESET_SAMPLES: Record<string, { es: AnalysisReportData; pt: AnalysisRepor
 };
 
 export default function App() {
-  const [language, setLanguage] = useState<"es" | "pt" | "en">("es");
-  const [mainView, setMainView] = useState<"analyzer" | "blog">("analyzer");
-  const [activeTab, setActiveTab] = useState<"canvas" | "upload" | "guided">("canvas");
-  
-  // Google AdSense settings states
-  const [adsensePubId, setAdsensePubId] = useState<string>(() => {
-    return localStorage.getItem("graphostudio_adsense_pub_id") || "";
-  });
-  const [adsenseSlotId, setAdsenseSlotId] = useState<string>(() => {
-    return localStorage.getItem("graphostudio_adsense_slot_id") || "";
-  });
-  const [adsenseShowPlaceholders, setAdsenseShowPlaceholders] = useState<boolean>(() => {
-    const saved = localStorage.getItem("graphostudio_adsense_show_placeholders");
-    return saved !== null ? saved === "true" : true;
-  });
-  const [showAdSenseModal, setShowAdSenseModal] = useState(false);
-
-  // Dynamically load Google AdSense client script when publisher ID is configured
-  useEffect(() => {
-    if (adsensePubId && adsensePubId.trim().startsWith("ca-pub-")) {
-      const pubId = adsensePubId.trim();
-      // Remove any existing script to avoid duplication or conflicts
-      const existingScript = document.querySelector('script[src*="pagead2.googlesyndication.com"]');
-      if (existingScript) {
-        existingScript.remove();
-      }
-      
-      const script = document.createElement("script");
-      script.async = true;
-      script.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${pubId}`;
-      script.crossOrigin = "anonymous";
-      document.head.appendChild(script);
+  const [language, setLanguage] = useState<"es" | "pt" | "en">(() => {
+    const saved = localStorage.getItem("graphostudio_language");
+    if (saved === "es" || saved === "pt" || saved === "en") {
+      return saved;
     }
-  }, [adsensePubId]);
+    return "es";
+  });
+  const [mainView, setMainView] = useState<"analyzer" | "blog" | "mixpanel">("analyzer");
+  const [activeTab, setActiveTab] = useState<"canvas" | "upload" | "guided" | "presets">("presets");
+  
+  const [showMixpanelDashboard, setShowMixpanelDashboard] = useState(false);
+
+  // Smooth scroll to the handwriting analyzer tool
+  const handleAnalyzerClick = () => {
+    setMainView("analyzer");
+    setTimeout(() => {
+      const element = document.getElementById("input-column");
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 100);
+  };
 
   // Inputs
   const [canvasImage, setCanvasImage] = useState<string | null>(null);
@@ -411,6 +402,25 @@ export default function App() {
       clearInterval(activeInterval);
     };
   }, []);
+
+  // Track key state changes in Mixpanel
+  useEffect(() => {
+    trackEvent("Application Launched", {
+      initial_language: language,
+      initial_view: mainView,
+      initial_tab: activeTab
+    });
+  }, []);
+
+  useEffect(() => {
+    // Avoid double logging on initial render since Application Launched already logs the initial view
+    trackEvent("View Changed", { view: mainView });
+  }, [mainView]);
+
+  useEffect(() => {
+    // Avoid double logging on initial render since Application Launched already logs the initial tab
+    trackEvent("Tab Changed", { tab: activeTab });
+  }, [activeTab]);
 
   // Translation Dictionary
   const t = {
@@ -630,11 +640,15 @@ export default function App() {
   const handlePresetChange = (presetKey: string) => {
     setSelectedPreset(presetKey);
     setReport(PRESET_SAMPLES[presetKey][language]);
+    trackEvent("Preset Selected", { preset: presetKey, language });
   };
 
   // Change Language & translate active state
   const changeLanguage = (nextLang: "es" | "pt" | "en") => {
+    const prevLang = language;
     setLanguage(nextLang);
+    localStorage.setItem("graphostudio_language", nextLang);
+    trackEvent("Language Changed", { from: prevLang, to: nextLang });
     // Translate the active report as well if it's one of the presets
     if (selectedPreset && PRESET_SAMPLES[selectedPreset]) {
       setReport(PRESET_SAMPLES[selectedPreset][nextLang]);
@@ -645,6 +659,7 @@ export default function App() {
   const runAnalysis = async () => {
     setErrorMsg(null);
     setIsLoading(true);
+    trackEvent("Analysis Started", { method: activeTab, language });
 
     let payload: any = {};
 
@@ -693,9 +708,12 @@ export default function App() {
 
       const data: AnalysisReportData = await response.json();
       setReport(data);
+      trackEvent("Analysis Success", { method: activeTab, language });
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || "Não foi possível conectar ao servidor de análise. Verifique sua chave API do Gemini nas configurações.");
+      const errMsg = err.message || "Não foi possível conectar ao servidor de análise. Verifique sua chave API do Gemini nas configurações.";
+      setErrorMsg(errMsg);
+      trackEvent("Analysis Failed", { method: activeTab, language, error: errMsg });
     } finally {
       setIsLoading(false);
     }
@@ -725,66 +743,7 @@ export default function App() {
   ] : [];
 
   // Reusable component to render Google AdSense ad units or elegant visual placeholders
-  const AdSenseBanner = ({ slot, className = "" }: { slot: string; className?: string }) => {
-    if (adsensePubId && adsensePubId.trim().startsWith("ca-pub-")) {
-      const pubId = adsensePubId.trim();
-      return (
-        <div className={`w-full overflow-hidden flex justify-center py-2 bg-slate-50/50 dark:bg-slate-900/10 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 ${className}`}>
-          <div className="w-full max-w-lg min-h-[90px] flex flex-col items-center justify-center">
-            <ins
-              className="adsbygoogle"
-              style={{ display: "block" }}
-              data-ad-client={pubId}
-              data-ad-slot={slot || adsenseSlotId || "default"}
-              data-ad-format="auto"
-              data-full-width-responsive="true"
-            />
-            <script>
-              {`(adsbygoogle = window.adsbygoogle || []).push({});`}
-            </script>
-          </div>
-        </div>
-      );
-    }
-
-    if (!adsenseShowPlaceholders) return null;
-
-    return (
-      <div 
-        onClick={() => setShowAdSenseModal(true)}
-        className={`w-full p-4 bg-gradient-to-r from-amber-500/5 to-yellow-500/5 dark:from-amber-400/2 dark:to-yellow-400/2 rounded-2xl border-2 border-dashed border-amber-400/30 dark:border-amber-500/20 hover:border-amber-400 dark:hover:border-amber-400 cursor-pointer transition-all duration-300 relative overflow-hidden group/ad ${className}`}
-      >
-        <div className="absolute top-0 right-0 p-1 bg-amber-400/10 text-amber-600 dark:text-amber-400 rounded-bl-xl text-[8px] font-black tracking-wider uppercase">
-          Google AdSense Space
-        </div>
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-center sm:text-left">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-amber-400/10 text-amber-500 flex items-center justify-center shrink-0">
-              <span className="text-lg">🪙</span>
-            </div>
-            <div>
-              <h5 className="text-[10px] font-black text-amber-800 dark:text-amber-400 uppercase tracking-wider flex items-center justify-center sm:justify-start gap-1">
-                {language === "es" ? "Anuncio Google AdSense" : language === "pt" ? "Espaço Publicitário AdSense" : "AdSense Advertisement Unit"}
-              </h5>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal mt-0.5">
-                {language === "es" 
-                  ? "Esta sección mostrará publicidad real cuando asocies tu código de AdSense sin tocar programación." 
-                  : language === "pt" 
-                  ? "Esta seção exibirá anúncios reais assim que você conectar seu código do AdSense aqui." 
-                  : "This space will display real ads once you link your AdSense code without editing any files."}
-              </p>
-            </div>
-          </div>
-          <button 
-            type="button"
-            className="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 dark:bg-amber-500/20 dark:hover:bg-amber-500/30 text-white dark:text-amber-300 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-pointer shadow-xs border border-amber-400/10 transition-all shrink-0 group-hover/ad:scale-105"
-          >
-            {language === "es" ? "Configurar" : language === "pt" ? "Configurar" : "Configure"}
-          </button>
-        </div>
-      </div>
-    );
-  };
+  const AdSenseBanner = () => null;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-300 relative overflow-hidden">
@@ -814,7 +773,7 @@ export default function App() {
           <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl text-xs font-bold border border-slate-200/40 dark:border-slate-800">
             <button
               type="button"
-              onClick={() => setMainView("analyzer")}
+              onClick={handleAnalyzerClick}
               className={`px-2.5 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
                 mainView === "analyzer"
                   ? "bg-indigo-600 text-white shadow-sm"
@@ -835,19 +794,35 @@ export default function App() {
               <BookOpen className="w-3.5 h-3.5 text-indigo-500 group-hover:text-white" />
               {language === "es" ? "Blog" : language === "pt" ? "Blog" : "Blog"}
             </button>
+            <button
+              type="button"
+              onClick={() => setMainView("mixpanel")}
+              className={`px-2.5 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1 sm:gap-1.5 ${
+                mainView === "mixpanel"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
+              }`}
+            >
+              <BarChart2 className="w-3.5 h-3.5 text-indigo-500 group-hover:text-white" />
+              {language === "es" ? "Mixpanel" : language === "pt" ? "Mixpanel" : "Mixpanel"}
+            </button>
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2">
-            {/* Google AdSense Configuration Panel Button */}
+            {/* Mixpanel Tracking Dashboard Button */}
             <button
               type="button"
-              onClick={() => setShowAdSenseModal(true)}
-              className="p-1.5 sm:p-2 bg-amber-50 dark:bg-amber-950/20 hover:bg-amber-100 dark:hover:bg-amber-950/40 border border-amber-200/50 dark:border-amber-900/45 rounded-xl text-amber-600 dark:text-amber-400 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
-              title={language === "es" ? "Ajustes de Publicidad Google AdSense" : language === "pt" ? "Ajustes de Publicidade AdSense" : "Google AdSense Settings"}
+              onClick={() => setMainView(prev => prev === "mixpanel" ? "analyzer" : "mixpanel")}
+              className={`p-1.5 sm:p-2 border rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-xs ${
+                mainView === "mixpanel"
+                  ? "bg-indigo-600 border-indigo-700 text-white hover:bg-indigo-700"
+                  : "bg-indigo-50 dark:bg-indigo-950/20 hover:bg-indigo-100 dark:hover:bg-indigo-950/40 border-indigo-200/50 dark:border-indigo-900/45 text-indigo-600 dark:text-indigo-400"
+              }`}
+              title={language === "es" ? "Métricas y Configuración de Mixpanel" : language === "pt" ? "Métricas do Mixpanel" : "Mixpanel Metrics"}
             >
-              <span className="text-sm">🪙</span>
+              <BarChart2 className="w-3.5 h-3.5" />
               <span className="hidden sm:inline font-extrabold tracking-wide text-[10px] uppercase">
-                {language === "es" ? "Monetizar" : language === "pt" ? "AdSense" : "AdSense"}
+                {language === "es" ? "Mixpanel" : language === "pt" ? "Mixpanel" : "Mixpanel"}
               </span>
             </button>
 
@@ -896,36 +871,15 @@ export default function App() {
 
       {/* Main Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col gap-6">
-        
-        {/* Navigation Tabs for mobile/desktop to switch views */}
-        <div className="flex justify-center -mb-2">
-          <div className="flex bg-white dark:bg-slate-900 p-1.5 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-xs max-w-sm w-full grid grid-cols-2">
-            <button
-              type="button"
-              onClick={() => setMainView("analyzer")}
-              className={`py-2 px-3 text-xs font-black rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
-                mainView === "analyzer"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              <Brain className="w-3.5 h-3.5" />
-              {language === "es" ? "Analizador" : language === "pt" ? "Analisador" : "Analyzer"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setMainView("blog")}
-              className={`py-2 px-3 text-xs font-black rounded-xl cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
-                mainView === "blog"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
-              }`}
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              {language === "es" ? "Blog" : language === "pt" ? "Blog" : "Blog"}
-            </button>
+
+        {mainView === "mixpanel" && (
+          <div className="w-full">
+            <MixpanelDashboard 
+              language={language} 
+              onClose={() => setMainView("analyzer")} 
+            />
           </div>
-        </div>
+        )}
 
         {mainView === "analyzer" && (
           <>
@@ -1128,14 +1082,25 @@ export default function App() {
               </div>
 
               {/* Tabs Navigation */}
-              <div className="grid grid-cols-3 gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl text-[11px] sm:text-xs font-semibold">
+              <div className="grid grid-cols-4 gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl text-[11px] sm:text-xs font-semibold animate-fade-in">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("presets")}
+                  className={`py-2 px-0.5 rounded-lg text-center transition-all cursor-pointer text-[10px] sm:text-xs ${
+                    activeTab === "presets"
+                      ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-300 shadow-xs font-black"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
+                  }`}
+                >
+                  {t.tabPresets}
+                </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("canvas")}
-                  className={`py-2 px-1 rounded-lg text-center transition-all cursor-pointer ${
+                  className={`py-2 px-0.5 rounded-lg text-center transition-all cursor-pointer text-[10px] sm:text-xs ${
                     activeTab === "canvas"
-                      ? "bg-white dark:bg-slate-800 text-orange-600 dark:text-orange-400 font-extrabold shadow-xs"
-                      : "animate-blink-yellow-orange font-extrabold hover:text-orange-500"
+                      ? "bg-white dark:bg-slate-800 text-orange-600 dark:text-orange-400 font-black shadow-xs"
+                      : "animate-blink-yellow-orange font-black hover:text-orange-500"
                   }`}
                 >
                   {t.tabCanvas}
@@ -1143,10 +1108,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("upload")}
-                  className={`py-2 px-1 rounded-lg text-center transition-all cursor-pointer ${
+                  className={`py-2 px-0.5 rounded-lg text-center transition-all cursor-pointer text-[10px] sm:text-xs ${
                     activeTab === "upload"
-                      ? "bg-white dark:bg-slate-800 text-orange-600 dark:text-orange-400 font-extrabold shadow-xs"
-                      : "animate-blink-yellow-orange font-extrabold hover:text-orange-500"
+                      ? "bg-white dark:bg-slate-800 text-orange-600 dark:text-orange-400 font-black shadow-xs"
+                      : "animate-blink-yellow-orange font-black hover:text-orange-500"
                   }`}
                 >
                   {t.tabUpload}
@@ -1154,7 +1119,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("guided")}
-                  className={`py-2 px-1 rounded-lg text-center transition-all cursor-pointer ${
+                  className={`py-2 px-0.5 rounded-lg text-center transition-all cursor-pointer text-[10px] sm:text-xs ${
                     activeTab === "guided"
                       ? "bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-300 shadow-xs"
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
@@ -1166,6 +1131,80 @@ export default function App() {
 
               {/* Tab Contents */}
               <div className="min-h-[220px] flex flex-col justify-between">
+                
+                {/* PRESETS TAB */}
+                {activeTab === "presets" && (
+                  <div className="flex flex-col gap-3 animate-fade-in">
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-normal mb-1">
+                      {language === "es" 
+                        ? "Elegí una de nuestras muestras pre-analizadas para probar el dashboard interactivo al toque sin clave de API:" 
+                        : language === "pt" 
+                        ? "Escolha uma de nossas amostras pré-analisadas para testar o painel imediatamente sem chave de API:" 
+                        : "Select one of our pre-analyzed samples to try the interactive dashboard instantly without an API key:"}
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handlePresetChange("leader")}
+                        className={`p-2 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          selectedPreset === "leader"
+                            ? "bg-indigo-50/50 dark:bg-indigo-950/40 border-indigo-500 text-indigo-700 dark:text-indigo-300"
+                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900"
+                        }`}
+                      >
+                        <span className="text-sm shrink-0">🦁</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-xs truncate">
+                            {language === "es" ? "Líder Determinado" : language === "pt" ? "Líder Determinado" : "Driven Leader"}
+                          </p>
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                            {language === "es" ? "Firma angulosa, firme y ascendente" : language === "pt" ? "Caligrafia angulosa, firme e ascendente" : "Angular, firm, and ascending writing"}
+                          </p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handlePresetChange("thinker")}
+                        className={`p-2 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          selectedPreset === "thinker"
+                            ? "bg-indigo-50/50 dark:bg-indigo-950/40 border-indigo-500 text-indigo-700 dark:text-indigo-300"
+                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900"
+                        }`}
+                      >
+                        <span className="text-sm shrink-0">🦉</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-xs truncate">
+                            {language === "es" ? "Pensador Analítico" : language === "pt" ? "Pensador Analítico" : "Analytical Thinker"}
+                          </p>
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                            {language === "es" ? "Letra pequeña, vertical y legible" : language === "pt" ? "Caligrafia pequena, vertical e organizada" : "Small, vertical, and clean handwriting"}
+                          </p>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handlePresetChange("artist")}
+                        className={`p-2 rounded-xl border text-left cursor-pointer transition-all flex items-center gap-2.5 ${
+                          selectedPreset === "artist"
+                            ? "bg-indigo-50/50 dark:bg-indigo-950/40 border-indigo-500 text-indigo-700 dark:text-indigo-300"
+                            : "bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900"
+                        }`}
+                      >
+                        <span className="text-sm shrink-0">🎨</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-xs truncate">
+                            {language === "es" ? "Artista Creativo" : language === "pt" ? "Artista Criativo" : "Creative Artist"}
+                          </p>
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">
+                            {language === "es" ? "Letra curvilínea, inflada y original" : language === "pt" ? "Caligrafia curvilínea, ampla e original" : "Curved, round, and creative strokes"}
+                          </p>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+                )}
                 
                 {/* CANVAS TAB */}
                 {activeTab === "canvas" && (
@@ -1300,7 +1339,9 @@ export default function App() {
                         }
                         return language === "es" ? "Muestra Personalizada" : language === "pt" ? "Amostra Personalizada" : "Custom Handwriting Sample";
                       };
-                      generatePDF(report, language, getPresetLabel());
+                      const presetLabel = getPresetLabel();
+                      generatePDF(report, language, presetLabel);
+                      trackEvent("PDF Downloaded", { preset: selectedPreset || "custom", presetLabel, language });
                     }}
                     className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all shadow-md shadow-indigo-600/15 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
                     id="download-laudo-btn"
@@ -1774,238 +1815,7 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Google AdSense Monetization Center Modal */}
-      {showAdSenseModal && (
-        <div className="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            {/* Header */}
-            <div className="bg-gradient-to-r from-amber-500 to-yellow-500 p-6 text-white flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 bg-white/10 rounded-2xl flex items-center justify-center text-2xl shadow-inner">
-                  🪙
-                </div>
-                <div>
-                  <h3 className="text-lg font-black tracking-tight">
-                    {language === "es" ? "Centro de Monetización Google AdSense" : language === "pt" ? "Central de Monetização Google AdSense" : "Google AdSense Monetization Center"}
-                  </h3>
-                  <p className="text-xs text-amber-50 font-semibold opacity-90">
-                    {language === "es" ? "Monetizá tu web sin saber programar" : language === "pt" ? "Monetize seu site sem saber programar" : "Monetize your website without writing code"}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowAdSenseModal(false)}
-                className="p-1 rounded-full hover:bg-white/20 transition-colors text-white cursor-pointer"
-                title="Cerrar"
-              >
-                <XCircle className="w-7 h-7" />
-              </button>
-            </div>
 
-            {/* Scrollable Content */}
-            <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-6 text-xs text-slate-600 dark:text-slate-300">
-              
-              {/* Introduction Card */}
-              <div className="bg-amber-500/5 dark:bg-amber-400/2 p-4 rounded-2xl border border-amber-500/15 dark:border-amber-400/10 flex gap-3.5 items-start">
-                <Info className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                <div className="flex-1">
-                  <p className="font-bold text-slate-800 dark:text-slate-200">
-                    {language === "es" ? "¡Hola! Configurar tus anuncios es re fácil" : language === "pt" ? "Olá! Configurar seus anúncios é muito fácil" : "Hello! Setting up your ads is simple"}
-                  </p>
-                  <p className="mt-1 leading-relaxed text-slate-500 dark:text-slate-400">
-                    {language === "es" 
-                      ? "Hemos creado 3 zonas de anuncios estratégicas (arriba, lateral y abajo del informe). Solo ingresá tu ID de editor de AdSense y el sitio se encargará de cargar los anuncios reales automáticamente de manera segura." 
-                      : language === "pt" 
-                      ? "Criamos 3 áreas estratégicas de anúncios (superior, lateral e inferior do laudo). Basta colar o seu ID de editor do AdSense e o site cuidará de carregar os anúncios de forma automática e segura." 
-                      : "We have designated 3 premium, high-converting ad zones (top banner, sidebar, and below results). Simply save your AdSense Publisher ID, and our integration will render real ads automatically."}
-                  </p>
-                </div>
-              </div>
-
-              {/* Form Settings */}
-              <div className="bg-slate-50 dark:bg-slate-950/40 p-5 rounded-2xl border border-slate-200/50 dark:border-slate-800/50 flex flex-col gap-4">
-                <h4 className="text-[11px] font-black uppercase text-slate-900 dark:text-white tracking-wider flex items-center gap-1.5">
-                  <Settings className="w-4 h-4 text-amber-500" />
-                  {language === "es" ? "Datos de tu Cuenta AdSense" : language === "pt" ? "Dados da sua Conta AdSense" : "AdSense Account Credentials"}
-                </h4>
-
-                {/* Publisher ID input */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="font-extrabold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                    <span>{language === "es" ? "1. Código de Editor (Publisher ID) *" : language === "pt" ? "1. Código de Editor (Publisher ID) *" : "1. Publisher ID (ca-pub-xxx) *"}</span>
-                    <span className="text-[10px] text-indigo-500 hover:underline font-normal cursor-pointer flex items-center gap-1" onClick={() => {
-                      navigator.clipboard.writeText("ca-pub-");
-                    }}>
-                      <Copy className="w-3.5 h-3.5" />
-                      {language === "es" ? "Copiar formato" : language === "pt" ? "Copiar formato" : "Copy format"}
-                    </span>
-                  </label>
-                  <input
-                    type="text"
-                    value={adsensePubId}
-                    onChange={(e) => {
-                      const val = e.target.value.trim();
-                      setAdsensePubId(val);
-                      localStorage.setItem("graphostudio_adsense_pub_id", val);
-                    }}
-                    placeholder="Ej: ca-pub-1234567890123456"
-                    className="w-full text-xs font-mono p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-300 dark:border-slate-700 focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                  />
-                  <p className="text-[10px] text-slate-400">
-                    {language === "es" 
-                      ? "Debe empezar exactamente con 'ca-pub-'. Podés encontrarlo en tu cuenta de AdSense en Cuenta > Información de cuenta." 
-                      : language === "pt" 
-                      ? "Deve começar com 'ca-pub-'. Encontre-o no seu painel AdSense em Conta > Informações da conta." 
-                      : "Must start with 'ca-pub-'. You can copy it from your AdSense Dashboard under Account > Account Information."}
-                  </p>
-                </div>
-
-                {/* Slot ID Input (Optional) */}
-                <div className="flex flex-col gap-1.5 mt-1">
-                  <label className="font-extrabold text-slate-700 dark:text-slate-300">
-                    {language === "es" ? "2. ID de Bloque de Anuncio (Opcional)" : language === "pt" ? "2. ID do Bloco de Anúncios (Opcional)" : "2. Default Ad Unit ID / Slot ID (Optional)"}
-                  </label>
-                  <input
-                    type="text"
-                    value={adsenseSlotId}
-                    onChange={(e) => {
-                      const val = e.target.value.trim();
-                      setAdsenseSlotId(val);
-                      localStorage.setItem("graphostudio_adsense_slot_id", val);
-                    }}
-                    placeholder="Ej: 9876543210"
-                    className="w-full text-xs font-mono p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-300 dark:border-slate-700 focus:ring-2 focus:ring-amber-500 focus:outline-hidden"
-                  />
-                  <p className="text-[10px] text-slate-400">
-                    {language === "es" 
-                      ? "Si creaste un bloque de anuncio Display específico para este sitio, podés colocar su ID numérico aquí." 
-                      : language === "pt" 
-                      ? "Se você criou um bloco de anúncios específico para este site, coloque o ID numérico aqui." 
-                      : "If you created a specific Display ad unit for this site, specify its slot ID here."}
-                  </p>
-                </div>
-
-                {/* Show placeholders toggle */}
-                <div className="flex items-center justify-between p-3 bg-white dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 mt-2">
-                  <div className="flex gap-2.5 items-start">
-                    <Layout className="w-4 h-4 text-slate-400 mt-0.5" />
-                    <div>
-                      <p className="font-bold text-slate-800 dark:text-slate-200">
-                        {language === "es" ? "Mostrar placeholders visuales" : language === "pt" ? "Mostrar espaços de rascunho" : "Show visual layout fallbacks"}
-                      </p>
-                      <p className="text-[10px] text-slate-400 mt-0.5 leading-normal">
-                        {language === "es" 
-                          ? "Muestra cajas informativas en donde se verán tus anuncios para previsualizar el diseño de tu sitio." 
-                          : language === "pt" 
-                          ? "Exibe caixas indicativas nos locais dos anúncios para planejar e visualizar o layout." 
-                          : "Display colored slots to easily preview and design where ads will appear on the page."}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nextVal = !adsenseShowPlaceholders;
-                      setAdsenseShowPlaceholders(nextVal);
-                      localStorage.setItem("graphostudio_adsense_show_placeholders", nextVal ? "true" : "false");
-                    }}
-                    className={`w-11 h-6 rounded-full transition-colors relative cursor-pointer outline-hidden shrink-0 ${adsenseShowPlaceholders ? "bg-amber-500" : "bg-slate-300 dark:bg-slate-800"}`}
-                  >
-                    <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${adsenseShowPlaceholders ? "translate-x-5" : "translate-x-0"}`} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Step by Step Guide */}
-              <div className="flex flex-col gap-3">
-                <h4 className="text-[11px] font-black uppercase text-slate-900 dark:text-white tracking-wider flex items-center gap-1.5">
-                  <Code className="w-4 h-4 text-amber-500" />
-                  {language === "es" ? "Guía Paso a Paso para Monetizar" : language === "pt" ? "Passo a Passo para Começar" : "How to complete your AdSense setup"}
-                </h4>
-
-                <div className="flex flex-col gap-3.5 pl-1.5">
-                  <div className="flex gap-3">
-                    <span className="w-5 h-5 bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center font-bold shrink-0 text-[10px]">1</span>
-                    <p className="leading-relaxed">
-                      <strong>{language === "es" ? "Iniciá sesión en AdSense:" : language === "pt" ? "Faça login no Google AdSense:" : "Log in to your Google AdSense Dashboard:"}</strong>{" "}
-                      {language === "es" 
-                        ? "Andá a adsense.google.com y entrá a tu cuenta autorizada." 
-                        : language === "pt" 
-                        ? "Acesse adsense.google.com e faça login na sua conta ativa." 
-                        : "Navigate to adsense.google.com and log into your account."}
-                    </p>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <span className="w-5 h-5 bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center font-bold shrink-0 text-[10px]">2</span>
-                    <p className="leading-relaxed">
-                      <strong>{language === "es" ? "Obtené tu Publisher ID:" : language === "pt" ? "Pegue o seu ID de Editor:" : "Find your Publisher ID:"}</strong>{" "}
-                      {language === "es" 
-                        ? "Buscá arriba a la derecha tu ID que tiene la forma ca-pub-XXXXXXXXXXXXXXXX. Copialo completo." 
-                        : language === "pt" 
-                        ? "No canto superior direito ou em Conta > Informações da conta, copie seu ID ca-pub-XXXXXXXXXXXXXXXX." 
-                        : "Check under Account > Account Information or look at the top right to copy your ID (e.g. ca-pub-xxxxxxxxxxxxxxxx)."}
-                    </p>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <span className="w-5 h-5 bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-full flex items-center justify-center font-bold shrink-0 text-[10px]">3</span>
-                    <p className="leading-relaxed">
-                      <strong>{language === "es" ? "Pegalo acá abajo y guardá:" : language === "pt" ? "Cole aqui e salve:" : "Paste and Save changes:"}</strong>{" "}
-                      {language === "es" 
-                        ? "Ingresalo en el campo 'Código de Editor' arriba y presioná Guardar. ¡Listo! Ya estás monetizando tus visitas sin tocar una sola línea de código." 
-                        : language === "pt" 
-                        ? "Insira-o no campo de entrada acima e clique em Concluir. Pronto! Suas visitas já começam a gerar rendimentos." 
-                        : "Paste it into the fields above and press the complete button. You are ready to generate revenue!"}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Info regarding Auto Ads */}
-              <div className="bg-slate-100 dark:bg-slate-950 p-4.5 rounded-2xl border border-slate-200 dark:border-slate-800 flex gap-3 items-start">
-                <Sparkles className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5 animate-pulse" />
-                <p className="text-[10px] leading-relaxed text-slate-500 dark:text-slate-400">
-                  <strong>{language === "es" ? "💡 Soporte para Anuncios Automáticos (Auto Ads):" : language === "pt" ? "💡 Suporte para Anúncios Automáticos (Auto Ads):" : "💡 Supports Google Auto Ads:"}</strong>{" "}
-                  {language === "es" 
-                    ? "Nuestra integración carga de forma segura el script oficial de Google. Esto significa que si activaste 'Anuncios Automáticos' en tu panel de Google AdSense, Google distribuirá anuncios flotantes adicionales automáticamente por el sitio." 
-                    : language === "pt" 
-                    ? "Nossa integração injeta de forma limpa o script oficial do Google. Se você habilitou 'Anúncios Automáticos' no painel do AdSense, o Google distribuirá anúncios flutuantes inteligentes ao longo do site." 
-                    : "Our dynamic engine loads Google's script seamlessly. If you turned on 'Auto Ads' in your AdSense control panel, Google will automatically serve floating anchor and overlay ads on your pages."}
-                </p>
-              </div>
-
-            </div>
-
-            {/* Actions Footer */}
-            <div className="p-6 bg-slate-50 dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setAdsensePubId("");
-                  setAdsenseSlotId("");
-                  localStorage.removeItem("graphostudio_adsense_pub_id");
-                  localStorage.removeItem("graphostudio_adsense_slot_id");
-                  setShowAdSenseModal(false);
-                }}
-                className="text-slate-500 hover:text-rose-500 text-xs font-bold py-2.5 px-4 rounded-xl hover:bg-rose-500/5 transition-all cursor-pointer border border-transparent hover:border-rose-500/10"
-              >
-                {language === "es" ? "Desactivar / Limpiar Todo" : language === "pt" ? "Desativar / Limpar Tudo" : "Disable / Reset Configuration"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAdSenseModal(false);
-                }}
-                className="w-full sm:w-auto px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs transition-all shadow-md shadow-indigo-600/15 cursor-pointer text-center"
-              >
-                {language === "es" ? "¡Listo, Guardar Cambios! 🌟" : language === "pt" ? "Salvar Alterações! 🌟" : "Save Changes! 🌟"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   );

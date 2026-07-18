@@ -32,7 +32,9 @@ import {
   Instagram,
   Linkedin,
   Facebook,
-  Printer
+  Printer,
+  Share2,
+  Link
 } from "lucide-react";
 import { 
   ResponsiveContainer, 
@@ -61,6 +63,49 @@ import BlogSection from "./components/BlogSection";
 import { trackEvent, isMixpanelActive } from "./lib/mixpanel";
 import MixpanelDashboard from "./components/MixpanelDashboard";
 import { motion } from "motion/react";
+
+// Helper to encode report to a URL safe base64 string
+const encodeReportToUrl = (reportData: AnalysisReportData): string => {
+  try {
+    const json = JSON.stringify(reportData);
+    // Safe base64 encoding for Unicode characters
+    const base64 = btoa(encodeURIComponent(json).replace(/%([0-9A-F]{2})/g, (_, p1) => {
+      return String.fromCharCode(parseInt(p1, 16));
+    }));
+    return base64;
+  } catch (e) {
+    console.error("Error encoding report:", e);
+    return "";
+  }
+};
+
+// Helper to decode report from URL safe base64 string
+const decodeReportFromUrl = (base64: string): AnalysisReportData | null => {
+  try {
+    const json = decodeURIComponent(Array.prototype.map.call(atob(base64), (c: string) => {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    return JSON.parse(json);
+  } catch (e) {
+    console.error("Error decoding report from URL:", e);
+    return null;
+  }
+};
+
+const getSharedReportFromUrl = (): AnalysisReportData | null => {
+  try {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const reportParam = params.get("report");
+      if (reportParam) {
+        return decodeReportFromUrl(reportParam);
+      }
+    }
+  } catch (e) {
+    console.error("Error parsing URL params:", e);
+  }
+  return null;
+};
 
 // Static mock preset samples for rapid discovery and testing without API key setup
 const PRESET_SAMPLES: Record<string, { es: AnalysisReportData; pt: AnalysisReportData; en: AnalysisReportData }> = {
@@ -388,7 +433,15 @@ export default function App() {
   const [manualText, setManualText] = useState("");
   
   // Report state
-  const [report, setReport] = useState<AnalysisReportData | null>(null);
+  const [report, setReport] = useState<AnalysisReportData | null>(() => {
+    return getSharedReportFromUrl();
+  });
+  const [isSharedReport, setIsSharedReport] = useState<boolean>(() => {
+    return !!getSharedReportFromUrl();
+  });
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedText, setCopiedText] = useState(false);
+  
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [selectedPreset, setSelectedPreset] = useState<string>("");
@@ -441,6 +494,18 @@ export default function App() {
       initial_tab: activeTab
     });
   }, []);
+
+  // Scroll to results when loading a shared report
+  useEffect(() => {
+    if (isSharedReport) {
+      setTimeout(() => {
+        const element = document.getElementById("report-column");
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 500);
+    }
+  }, [isSharedReport]);
 
   useEffect(() => {
     // Avoid double logging on initial render since Application Launched already logs the initial view
@@ -670,6 +735,7 @@ export default function App() {
   const handlePresetChange = (presetKey: string) => {
     setSelectedPreset(presetKey);
     setReport(PRESET_SAMPLES[presetKey][language]);
+    setIsSharedReport(false);
     trackEvent("Preset Selected", { preset: presetKey, language });
   };
 
@@ -738,6 +804,7 @@ export default function App() {
 
       const data: AnalysisReportData = await response.json();
       setReport(data);
+      setIsSharedReport(false);
       trackEvent("Analysis Success", { 
         method: activeTab, 
         language,
@@ -751,6 +818,103 @@ export default function App() {
       trackEvent("Analysis Failed", { method: activeTab, language, error: errMsg });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const getDominantTemperamentLabel = (lang: "es" | "pt" | "en") => {
+    if (!report || !report.temperament) return "";
+    const temp = report.temperament;
+    const entries = Object.entries(temp) as [string, number][];
+    const sorted = entries.sort((a, b) => b[1] - a[1]);
+    const dominantKey = sorted[0][0]; // "sanguine" | "choleric" | "melancholic" | "phlegmatic"
+    
+    const labels = {
+      sanguine: { es: "Sanguíneo 🩸", pt: "Sanguíneo 🩸", en: "Sanguine 🩸" },
+      choleric: { es: "Colérico 🔥", pt: "Colérico 🔥", en: "Choleric 🔥" },
+      melancholic: { es: "Melancólico 🌌", pt: "Melancólico 🌌", en: "Melancholic 🌌" },
+      phlegmatic: { es: "Flemático 🍃", pt: "Flemático 🍃", en: "Phlegmatic 🍃" }
+    };
+    
+    return labels[dominantKey as keyof typeof labels]?.[lang] || dominantKey;
+  };
+
+  const handleCopyShareLink = () => {
+    if (!report) return;
+    try {
+      const shareUrl = `${window.location.origin}${window.location.pathname}?report=${encodeReportToUrl(report)}`;
+      navigator.clipboard.writeText(shareUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+      trackEvent("Share Link Copied", { preset: selectedPreset || "custom", language });
+    } catch (err) {
+      console.error("Failed to copy link:", err);
+    }
+  };
+
+  const handleShareSummary = async () => {
+    if (!report) return;
+    
+    // Generate the share URL
+    const shareUrl = `${window.location.origin}${window.location.pathname}?report=${encodeReportToUrl(report)}`;
+    
+    // Formatted summary text based on language
+    let shareTitle = "";
+    let shareText = "";
+    
+    if (language === "es") {
+      shareTitle = "Mi Análisis de Personalidad Grafológico";
+      shareText = `🔍 ¡Mira mi análisis de personalidad grafológico de GraphoStudio! ✨
+
+✍️ Mi temperamento dominante: ${getDominantTemperamentLabel("es")}
+📝 Perfil Psicológico:
+"${report.psychologicalProfile.slice(0, 200)}..."
+
+👉 Podés ver mi informe completo o hacer tu propio análisis gratis acá:
+${shareUrl}`;
+    } else if (language === "pt") {
+      shareTitle = "Meu Laudo de Personalidade Grafológico";
+      shareText = `🔍 Veja minha análise de personalidade grafológica do GraphoStudio! ✨
+
+✍️ Meu temperamento dominante: ${getDominantTemperamentLabel("pt")}
+📝 Perfil Psicológico:
+"${report.psychologicalProfile.slice(0, 200)}..."
+
+👉 Você pode ver meu laudo completo ou fazer sua própria análise grátis aqui:
+${shareUrl}`;
+    } else {
+      shareTitle = "My Handwriting Personality Analysis";
+      shareText = `🔍 Check out my handwriting personality analysis from GraphoStudio! ✨
+
+✍️ My dominant temperament: ${getDominantTemperamentLabel("en")}
+📝 Psychological Profile:
+"${report.psychologicalProfile.slice(0, 200)}..."
+
+👉 You can view my full report or do your own free analysis here:
+${shareUrl}`;
+    }
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: shareTitle,
+          text: shareText,
+          url: shareUrl
+        });
+        trackEvent("Report Shared via WebShare", { preset: selectedPreset || "custom", language });
+      } catch (err) {
+        // User cancelled or error
+        console.log("Web Share API cancelled or failed:", err);
+      }
+    } else {
+      // Fallback: copy formatted text to clipboard
+      try {
+        await navigator.clipboard.writeText(shareText);
+        setCopiedText(true);
+        setTimeout(() => setCopiedText(false), 2000);
+        trackEvent("Share Text Copied (Fallback)", { preset: selectedPreset || "custom", language });
+      } catch (err) {
+        console.error("Failed to copy share text fallback:", err);
+      }
     }
   };
 
@@ -1005,6 +1169,56 @@ export default function App() {
         </section>
 
         <AdSenseBanner slot="header-top-banner" className="max-w-3xl mx-auto mt-2" />
+
+        {isSharedReport && (
+          <div className="max-w-7xl mx-auto w-full mb-6 mt-4 print:hidden">
+            <div className="bg-gradient-to-r from-indigo-500/20 via-purple-500/20 to-indigo-500/20 dark:from-indigo-950/45 dark:via-purple-950/45 dark:to-indigo-950/45 p-5 rounded-2xl border border-indigo-300/60 dark:border-indigo-800/80 flex flex-col sm:flex-row items-center justify-between gap-5 shadow-xl relative overflow-hidden backdrop-blur-md">
+              <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl"></div>
+              <div className="flex items-center gap-4 relative z-10">
+                <span className="p-3 bg-indigo-600 text-white rounded-2xl shrink-0 shadow-lg shadow-indigo-600/30">
+                  <Award className="w-6 h-6 animate-pulse" />
+                </span>
+                <div className="text-left">
+                  <p className="font-extrabold text-slate-900 dark:text-white text-base flex items-center gap-2">
+                    <span>
+                      {language === "es" 
+                        ? "👁️ Estás viendo un análisis compartido" 
+                        : language === "pt" 
+                        ? "👁️ Você está visualizando uma análise compartilhada" 
+                        : "👁️ You are viewing a shared analysis report"}
+                    </span>
+                    <span className="text-[9px] uppercase font-bold bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 px-1.5 py-0.5 rounded-sm">SHARED</span>
+                  </p>
+                  <p className="text-xs text-slate-600 dark:text-slate-300 font-medium mt-1 leading-relaxed">
+                    {language === "es" 
+                      ? "Este informe de personalidad fue compartido con vos. ¡Leé los resultados o hacé tu propio análisis gratis en segundos!" 
+                      : language === "pt" 
+                      ? "Este laudo de personalidade foi compartilhado com você. Leia os resultados ou faça sua própria análise grátis em segundos!" 
+                      : "This personality report was shared with you. Read the results or perform your own free analysis in seconds!"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setReport(null);
+                  setIsSharedReport(false);
+                  setSelectedPreset("");
+                  try {
+                    const url = window.location.origin + window.location.pathname;
+                    window.history.replaceState({}, document.title, url);
+                  } catch (e) {
+                    console.error(e);
+                  }
+                }}
+                className="px-5 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 active:scale-95 text-white font-extrabold rounded-xl text-xs transition-all shrink-0 cursor-pointer shadow-lg shadow-indigo-600/20 flex items-center gap-2 hover:scale-[1.02] relative z-10"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>{language === "es" ? "Hacer Mi Propio Test Gratis" : language === "pt" ? "Fazer Meu Próprio Teste Grátis" : "Do My Free Analysis"}</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Action Panel Container */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start mt-4 print:block print:w-full print:mt-0">
@@ -1445,6 +1659,42 @@ export default function App() {
                       <Printer className="w-4 h-4 text-indigo-500" />
                       <span>{language === "es" ? "Imprimir" : language === "pt" ? "Imprimir" : "Print"}</span>
                     </button>
+
+                    <button
+                      onClick={handleCopyShareLink}
+                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-colors duration-250 ${
+                        copiedLink 
+                          ? "bg-emerald-600 border-emerald-600 text-white shadow-md shadow-emerald-600/15" 
+                          : "bg-teal-50 hover:bg-teal-100 dark:bg-teal-950/30 dark:hover:bg-teal-900/30 text-teal-700 dark:text-teal-300 border-teal-200/60 dark:border-teal-900/40"
+                      }`}
+                      id="copy-share-link-btn"
+                    >
+                      <Link className={`w-4 h-4 ${copiedLink ? "text-white animate-pulse" : "text-teal-500"}`} />
+                      <span>
+                        {copiedLink 
+                          ? (language === "es" ? "¡Enlace Copiado!" : language === "pt" ? "Link Copiado!" : "Link Copied!")
+                          : (language === "es" ? "Copiar Enlace" : language === "pt" ? "Copiar Link" : "Copy Share Link")
+                        }
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={handleShareSummary}
+                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border cursor-pointer hover:scale-[1.02] active:scale-[0.98] transition-colors duration-250 ${
+                        copiedText 
+                          ? "bg-emerald-600 border-emerald-600 text-white shadow-md shadow-emerald-600/15" 
+                          : "bg-amber-500 hover:bg-amber-600 text-white border-amber-500/50 shadow-md shadow-amber-500/15"
+                      }`}
+                      id="share-laudo-btn"
+                    >
+                      <Share2 className={`w-4 h-4 ${copiedText ? "text-white animate-pulse" : "text-amber-100"}`} />
+                      <span>
+                        {copiedText 
+                          ? (language === "es" ? "¡Copiado!" : language === "pt" ? "Copiado!" : "Copied!")
+                          : (language === "es" ? "Compartir" : language === "pt" ? "Compartilhar" : "Share Summary")
+                        }
+                      </span>
+                    </button>
                   </>
                 )}
               </div>
@@ -1473,6 +1723,49 @@ export default function App() {
                   <div className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed whitespace-pre-line bg-slate-50/50 dark:bg-slate-950/60 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
                     {report.psychologicalProfile}
                   </div>
+                </motion.div>
+
+                {/* Elegant Micro-Donation / Support Card (Bilingual / Trilingual) */}
+                <motion.div
+                  variants={reportItemVariants}
+                  className="bg-gradient-to-r from-amber-50/70 to-orange-50/70 dark:from-amber-950/10 dark:to-orange-950/10 p-5 rounded-2xl border border-amber-200/60 dark:border-amber-900/40 shadow-xs flex flex-col md:flex-row items-center justify-between gap-5"
+                >
+                  <div className="flex items-start gap-3.5 text-left">
+                    <div className="p-2.5 bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-xl shrink-0 mt-0.5">
+                      <Coffee className="w-5 h-5 fill-amber-600 dark:fill-amber-400 animate-bounce" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-extrabold text-amber-900 dark:text-amber-300 flex items-center gap-1.5 leading-tight">
+                        {language === "es" 
+                          ? "☕ ¿Te sorprendió la precisión de tu análisis?" 
+                          : language === "pt" 
+                          ? "☕ Ficou surpreso com a precisão da sua análise?" 
+                          : "☕ Surprised by the accuracy of your analysis?"}
+                      </h4>
+                      <p className="text-xs text-amber-800/85 dark:text-slate-300 mt-1 leading-relaxed">
+                        {language === "es" 
+                          ? "Esta herramienta es gratuita y libre de anuncios. Cada análisis consume recursos del servidor. Si el informe te aportó valor o te pareció preciso, ¡un cafecito nos ayuda un montón a seguir manteniéndola gratis!" 
+                          : language === "pt" 
+                          ? "Esta ferramenta é gratuita e livre de anúncios irritantes. Cada análise consome recursos de servidor. Se este laudo te agregou valor ou foi preciso, um cafézinho nos ajuda muito a continuar mantendo-a grátis!" 
+                          : "This tool is free and completely ad-free. Every AI analysis consumes real server resources. If this report was accurate or valuable to you, buying us a coffee helps us a lot to keep providing it for free!"}
+                      </p>
+                    </div>
+                  </div>
+                  <a
+                    href="https://mpago.la/2m7bcUT"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full md:w-auto shrink-0 flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white text-xs font-bold transition-all shadow-md shadow-amber-500/20 cursor-pointer hover:scale-[1.02]"
+                  >
+                    <span>
+                      {language === "es" 
+                        ? "Invitar un Cafecito" 
+                        : language === "pt" 
+                        ? "Oferecer um Cafézinho" 
+                        : "Buy us a Coffee"}
+                    </span>
+                    <ChevronRight className="w-4 h-4" />
+                  </a>
                 </motion.div>
 
                 {/* RECHARTS TRAIT DISTRIBUTION BENTO GRID SECTION */}

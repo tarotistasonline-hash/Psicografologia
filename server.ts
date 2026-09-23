@@ -20,8 +20,16 @@ app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 app.use(express.static(path.join(process.cwd(), "public")));
 
 // Explicit route for Google Search Console site verification
+app.get("/googlee814d7c05b3fbac6.html", (req, res) => {
+  res.type("text/html").send("google-site-verification: googlee814d7c05b3fbac6.html");
+});
 app.get("/google58edfc436fcfc958.html", (req, res) => {
   res.type("text/html").send("google-site-verification: google58edfc436fcfc958.html");
+});
+// Generic handler for any Google site verification HTML file
+app.get(/^\/google([a-zA-Z0-9_-]+)\.html$/, (req, res) => {
+  const filename = req.path.replace(/^\//, "");
+  res.type("text/html").send(`google-site-verification: ${filename}`);
 });
 
 // Helper to get Gemini Client lazily to prevent startup crashes if key is missing

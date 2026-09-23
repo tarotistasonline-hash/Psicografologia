@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import dotenv from "dotenv";
 import fs from "fs";
+import crypto from "crypto";
 import { GoogleGenAI, Type } from "@google/genai";
 import { createServer as createViteServer } from "vite";
 
@@ -14,6 +15,14 @@ const PORT = 3000;
 // Increase payload limits for canvas/image uploads
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
+
+// Serve static assets from public directory (robots.txt, sitemap.xml, verification files)
+app.use(express.static(path.join(process.cwd(), "public")));
+
+// Explicit route for Google Search Console site verification
+app.get("/google58edfc436fcfc958.html", (req, res) => {
+  res.type("text/html").send("google-site-verification: google58edfc436fcfc958.html");
+});
 
 // Helper to get Gemini Client lazily to prevent startup crashes if key is missing
 let aiClient: GoogleGenAI | null = null;
@@ -35,227 +44,242 @@ function getGeminiClient() {
   return aiClient;
 }
 
-// Simple internal file database for free metrics (Mixpanel alternative)
-interface SavedEvent {
-  name: string;
-  properties: Record<string, any>;
+// Dedicated Real Visits Counter Database (Mixpanel removed, owner visits excluded)
+interface VisitLog {
   timestamp: number;
+  dateStr: string;
+  ipHash: string;
+  sessionId: string;
+  isOwner?: boolean;
 }
 
-const EVENTS_FILE = path.join(process.cwd(), "events_db.json");
-let appEvents: SavedEvent[] = [];
+interface VisitsStore {
+  totalVisits: number;
+  excludedOwnerVisits: number;
+  ownerIps: string[];
+  visits: VisitLog[];
+}
 
-// Load historical events at startup
+const VISITS_FILE = path.join(process.cwd(), "visits_db.json");
+let visitsStore: VisitsStore = {
+  totalVisits: 0,
+  excludedOwnerVisits: 0,
+  ownerIps: [],
+  visits: []
+};
+
+// Simple active sessions cache in memory to prevent duplicate counts within 30 minutes
+const activeSessions = new Map<string, number>();
+
+// Helper to hash IP for privacy
+function hashIp(ip: string): string {
+  return crypto.createHash("sha256").update(ip + "_grapho_visit_salt").digest("hex").slice(0, 16);
+}
+
+// Load historical real visits from disk
 try {
-  if (fs.existsSync(EVENTS_FILE)) {
-    const raw = fs.readFileSync(EVENTS_FILE, "utf-8");
-    appEvents = JSON.parse(raw);
-    console.log(`[Metrics Server] Loaded ${appEvents.length} historical events.`);
+  if (fs.existsSync(VISITS_FILE)) {
+    const raw = fs.readFileSync(VISITS_FILE, "utf-8");
+    visitsStore = JSON.parse(raw);
+    console.log(`[Visits Server] Loaded visits DB: ${visitsStore.totalVisits} real visits, ${visitsStore.excludedOwnerVisits} excluded owner visits.`);
+  } else {
+    // Check if there was any historical visit count
+    fs.writeFileSync(VISITS_FILE, JSON.stringify(visitsStore, null, 2));
   }
 } catch (e) {
-  console.error("[Metrics Server] Error loading events database:", e);
+  console.error("[Visits Server] Error loading visits database:", e);
 }
 
-// Save events asynchronously
-async function saveEventsToDisk() {
+async function saveVisitsToDisk() {
   try {
-    await fs.promises.writeFile(EVENTS_FILE, JSON.stringify(appEvents, null, 2));
+    await fs.promises.writeFile(VISITS_FILE, JSON.stringify(visitsStore, null, 2));
   } catch (e) {
-    console.error("[Metrics Server] Error saving events to disk:", e);
+    console.error("[Visits Server] Error saving visits to disk:", e);
   }
 }
 
-// Track an event
-app.post("/api/metrics/track", (req, res) => {
+function getVisitsStats() {
+  const todayStr = new Date().toISOString().split("T")[0];
+  const todayVisits = visitsStore.visits.filter(v => v.dateStr === todayStr && !v.isOwner).length;
+  const uniqueIps = new Set(visitsStore.visits.filter(v => !v.isOwner).map(v => v.ipHash));
+  const uniqueVisitors = uniqueIps.size;
+  const lastVisit = visitsStore.visits.filter(v => !v.isOwner).slice(-1)[0];
+
+  // Count active sessions within the last 5 minutes (excluding owner IPs)
+  const now = Date.now();
+  const FIVE_MINUTES = 5 * 60 * 1000;
+  let activeUsersCount = 0;
+
+  for (const [key, ts] of activeSessions.entries()) {
+    if (now - ts <= FIVE_MINUTES) {
+      const parts = key.split("_");
+      const ipHash = parts[parts.length - 1];
+      if (!visitsStore.ownerIps.includes(ipHash)) {
+        activeUsersCount++;
+      }
+    } else {
+      activeSessions.delete(key);
+    }
+  }
+
+  // Active users can never exceed today's visits (if todayVisits is 0, active external users is strictly 0)
+  const activeUsers = Math.min(activeUsersCount, todayVisits);
+
+  return {
+    totalVisits: visitsStore.totalVisits,
+    todayVisits,
+    uniqueVisitors: Math.max(uniqueVisitors, visitsStore.totalVisits > 0 ? 1 : 0),
+    activeUsers,
+    excludedOwnerVisits: visitsStore.excludedOwnerVisits || 0,
+    lastVisitTime: lastVisit ? lastVisit.timestamp : undefined
+  };
+}
+
+// 1. Record a real visit (explicitly excluding the owner)
+app.post("/api/visits/record", (req, res) => {
   try {
-    const { name, properties = {} } = req.body;
-    if (!name) {
-      return res.status(400).json({ error: "Event name is required" });
+    const { isOwner, sessionId = "anon" } = req.body;
+    const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+    const ipHash = hashIp(rawIp);
+
+    // If client explicitly passed a boolean for isOwner, respect it:
+    let isKnownOwner = false;
+    if (typeof isOwner === "boolean") {
+      isKnownOwner = isOwner;
+      if (isOwner) {
+        if (!visitsStore.ownerIps.includes(ipHash)) {
+          visitsStore.ownerIps.push(ipHash);
+        }
+      } else {
+        // Explicitly including visits (testing mode)
+        visitsStore.ownerIps = visitsStore.ownerIps.filter(id => id !== ipHash);
+      }
+    } else {
+      isKnownOwner = visitsStore.ownerIps.includes(ipHash);
     }
 
-    const newEvent: SavedEvent = {
-      name,
-      properties,
-      timestamp: Date.now()
-    };
+    if (isKnownOwner) {
+      visitsStore.excludedOwnerVisits = (visitsStore.excludedOwnerVisits || 0) + 1;
+      saveVisitsToDisk();
 
-    appEvents.push(newEvent);
-    
-    // Cap at 2000 events to prevent massive disk space usage
-    if (appEvents.length > 2000) {
-      appEvents.shift();
+      console.log(`[Visits] Owner visit detected from ${ipHash} (Session: ${sessionId}) -> EXCLUDED from counter. Total excluded: ${visitsStore.excludedOwnerVisits}`);
+
+      const stats = getVisitsStats();
+      return res.json({
+        success: true,
+        isOwnerExcluded: true,
+        ...stats
+      });
     }
 
-    saveEventsToDisk();
-    return res.json({ success: true });
+    // Regular visitor: deduplicate within 30 minutes
+    const now = Date.now();
+    const sessionKey = `${sessionId}_${ipHash}`;
+    const lastSeen = activeSessions.get(sessionKey);
+    const THIRTY_MINUTES = 30 * 60 * 1000;
+
+    let isNewVisit = false;
+    if (!lastSeen || now - lastSeen > THIRTY_MINUTES) {
+      isNewVisit = true;
+      visitsStore.totalVisits = (visitsStore.totalVisits || 0) + 1;
+
+      const todayStr = new Date().toISOString().split("T")[0];
+      visitsStore.visits.push({
+        timestamp: now,
+        dateStr: todayStr,
+        ipHash,
+        sessionId,
+        isOwner: false
+      });
+
+      // Keep last 3000 visits
+      if (visitsStore.visits.length > 3000) {
+        visitsStore.visits.shift();
+      }
+
+      saveVisitsToDisk();
+      console.log(`[Visits] Real visitor recorded (Total: ${visitsStore.totalVisits}, Today: ${getVisitsStats().todayVisits}, IP: ${ipHash})`);
+    }
+
+    activeSessions.set(sessionKey, now);
+
+    const stats = getVisitsStats();
+    return res.json({
+      success: true,
+      isOwnerExcluded: false,
+      isNewVisit,
+      ...stats
+    });
   } catch (err: any) {
-    console.error("[Metrics Track API Error]", err);
+    console.error("[Visits Record API Error]", err);
     return res.status(500).json({ error: err.message });
   }
 });
 
-// Get aggregated summary for charts and statistics (blended with realistic baseline)
-app.get("/api/metrics/summary", (req, res) => {
+// 2. Get real visits stats
+app.get("/api/visits", (req, res) => {
   try {
-    // 1. Calculate basic counts from real events
-    let realVisits = 0;
-    let realAnalyses = 0;
-    let realPdfs = 0;
-    
-    const langCounts: Record<string, number> = { es: 0, pt: 0, en: 0 };
-    const temperamentSums = { sanguine: 0, choleric: 0, melancholic: 0, phlegmatic: 0 };
-    let temperamentCount = 0;
+    const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+    const ipHash = hashIp(rawIp);
+    const isOwnerQuery = req.query.isOwner === "1" || req.query.isOwner === "true";
+    const isKnownOwner = isOwnerQuery || visitsStore.ownerIps.includes(ipHash);
+    const sessionId = (req.query.sessionId as string) || "anon";
 
-    // Group real events by day
-    const realDailyCounts: Record<string, { visits: number; analyses: number; pdfs: number }> = {};
-
-    appEvents.forEach(ev => {
-      const date = new Date(ev.timestamp);
-      // Format to "DD MMM" in Spanish (e.g. "12 Jul")
-      const day = date.getDate().toString().padStart(2, "0");
-      const months = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-      const month = months[date.getMonth()];
-      const dateKey = `${day} ${month}`;
-
-      if (!realDailyCounts[dateKey]) {
-        realDailyCounts[dateKey] = { visits: 0, analyses: 0, pdfs: 0 };
-      }
-
-      if (ev.name === "Application Launched") {
-        realVisits++;
-        realDailyCounts[dateKey].visits++;
-        const lang = ev.properties?.language || "es";
-        if (langCounts[lang] !== undefined) langCounts[lang]++;
-      } else if (ev.name === "Analysis Success") {
-        realAnalyses++;
-        realDailyCounts[dateKey].analyses++;
-        
-        // Track temperaments if returned from analysis
-        if (ev.properties?.temperament) {
-          const t = ev.properties.temperament;
-          temperamentSums.sanguine += Number(t.sanguine || 0);
-          temperamentSums.choleric += Number(t.choleric || 0);
-          temperamentSums.melancholic += Number(t.melancholic || 0);
-          temperamentSums.phlegmatic += Number(t.phlegmatic || 0);
-          temperamentCount++;
-        }
-      } else if (ev.name === "PDF Downloaded") {
-        realPdfs++;
-        realDailyCounts[dateKey].pdfs++;
-      }
-    });
-
-    // 2. Setup baseline data (to guarantee beautiful initial state)
-    const baseVisits = 2854;
-    const baseAnalyses = 1942;
-    const basePdfs = 815;
-
-    const totalVisits = baseVisits + realVisits;
-    const totalAnalyses = baseAnalyses + realAnalyses;
-    const totalPdfs = basePdfs + realPdfs;
-    const conversionRate = Number(((totalAnalyses / totalVisits) * 100).toFixed(1));
-
-    // 3. Create the 15-day activity trend (blend baseline with real daily events)
-    const baseDailyData = [
-      { day: "28 Jun", visitas: 95, analisis: 60, pdfs: 24 },
-      { day: "29 Jun", visitas: 110, analisis: 72, pdfs: 28 },
-      { day: "30 Jun", visitas: 130, analisis: 84, pdfs: 34 },
-      { day: "01 Jul", visitas: 120, analisis: 75, pdfs: 30 },
-      { day: "02 Jul", visitas: 145, analisis: 92, pdfs: 38 },
-      { day: "03 Jul", visitas: 160, analisis: 105, pdfs: 48 },
-      { day: "04 Jul", visitas: 130, analisis: 80, pdfs: 32 },
-      { day: "05 Jul", visitas: 110, analisis: 68, pdfs: 25 },
-      { day: "06 Jul", visitas: 155, analisis: 98, pdfs: 40 },
-      { day: "07 Jul", visitas: 180, analisis: 125, pdfs: 55 },
-      { day: "08 Jul", visitas: 210, analisis: 148, pdfs: 64 },
-      { day: "09 Jul", visitas: 195, analisis: 130, pdfs: 58 },
-      { day: "10 Jul", visitas: 170, analisis: 112, pdfs: 45 },
-      { day: "11 Jul", visitas: 225, analisis: 160, pdfs: 72 },
-      { day: "12 Jul", visitas: 250, analisis: 185, pdfs: 88 }
-    ];
-
-    // Merge actual daily data into trend
-    const trafficData15d = baseDailyData.map(item => {
-      const real = realDailyCounts[item.day];
-      return {
-        day: item.day,
-        visitas: item.visitas + (real ? real.visits : 0),
-        analisis: item.analisis + (real ? real.analyses : 0),
-        pdfs: item.pdfs + (real ? real.pdfs : 0)
-      };
-    });
-
-    // 4. Conversion funnel rates
-    const funnelData = [
-      { stage: "1. Visita", value: 100, color: "#4f46e5" },
-      { stage: "2. Carga/Dibuja", value: Math.round(( (totalVisits * 0.84) / totalVisits ) * 100), color: "#8b5cf6" },
-      { stage: "3. Análisis", value: Math.round(( totalAnalyses / totalVisits ) * 100), color: "#10b981" },
-      { stage: "4. Guardar PDF", value: Math.round(( totalPdfs / totalVisits ) * 100), color: "#f59e0b" }
-    ];
-
-    // 5. Compute real personality types/temperament distribution
-    let finalSanguine = 35;
-    let finalCholeric = 25;
-    let finalMelancholic = 22;
-    let finalPhlegmatic = 18;
-
-    if (temperamentCount > 0) {
-      finalSanguine = Math.round((temperamentSums.sanguine / temperamentCount));
-      finalCholeric = Math.round((temperamentSums.choleric / temperamentCount));
-      finalMelancholic = Math.round((temperamentSums.melancholic / temperamentCount));
-      finalPhlegmatic = Math.round((temperamentSums.phlegmatic / temperamentCount));
-
-      // Re-normalize to sum up to 100%
-      const sum = finalSanguine + finalCholeric + finalMelancholic + finalPhlegmatic;
-      if (sum > 0) {
-        finalSanguine = Math.round((finalSanguine / sum) * 100);
-        finalCholeric = Math.round((finalCholeric / sum) * 100);
-        finalMelancholic = Math.round((finalMelancholic / sum) * 100);
-        finalPhlegmatic = 100 - (finalSanguine + finalCholeric + finalMelancholic);
-      }
+    if (!isKnownOwner) {
+      activeSessions.set(`${sessionId}_${ipHash}`, Date.now());
     }
 
-    const traitsData = [
-      { name: "Sanguíneo (Creativo / Dinámico)", value: finalSanguine, color: "#4f46e5" },
-      { name: "Colérico (Líder / Ambicioso)", value: finalCholeric, color: "#f59e0b" },
-      { name: "Melancólico (Analítico / Sensible)", value: finalMelancholic, color: "#10b981" },
-      { name: "Flemático (Calmo / Lógico)", value: finalPhlegmatic, color: "#ec4899" }
-    ];
-
-    // 6. Language preference distribution
-    const totalLangs = langCounts.es + langCounts.pt + langCounts.en;
-    let esPct = 55;
-    let ptPct = 30;
-    let enPct = 15;
-
-    if (totalLangs > 0) {
-      esPct = Math.round((langCounts.es / totalLangs) * 100);
-      ptPct = Math.round((langCounts.pt / totalLangs) * 100);
-      enPct = 100 - (esPct + ptPct);
-    }
-
-    const languageData = [
-      { name: "Español (ES)", value: esPct, color: "#4f46e5" },
-      { name: "Português (PT)", value: ptPct, color: "#10b981" },
-      { name: "English (EN)", value: enPct, color: "#f59e0b" }
-    ];
-
+    const stats = getVisitsStats();
     return res.json({
-      totalVisits,
-      totalAnalyses,
-      conversionRate,
-      totalPdfs,
-      trafficData15d,
-      funnelData,
-      traitsData,
-      languageData,
-      realCount: appEvents.length
+      ...stats,
+      isOwnerExcluded: isKnownOwner
     });
-
   } catch (err: any) {
-    console.error("[Metrics Summary API Error]", err);
     return res.status(500).json({ error: err.message });
   }
+});
+
+// 3. Toggle owner exclusion for the current client IP
+app.post("/api/visits/toggle-owner", (req, res) => {
+  try {
+    const { exclude } = req.body;
+    const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+    const ipHash = hashIp(rawIp);
+
+    if (exclude) {
+      if (!visitsStore.ownerIps.includes(ipHash)) {
+        visitsStore.ownerIps.push(ipHash);
+      }
+    } else {
+      visitsStore.ownerIps = visitsStore.ownerIps.filter(id => id !== ipHash);
+    }
+    saveVisitsToDisk();
+
+    const stats = getVisitsStats();
+    return res.json({
+      success: true,
+      isOwnerExcluded: Boolean(exclude),
+      ...stats
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Legacy backward-compatibility endpoints (minimal safe stubs)
+app.post("/api/metrics/track", (req, res) => res.json({ success: true }));
+app.get("/api/metrics/summary", (req, res) => {
+  const stats = getVisitsStats();
+  return res.json({
+    totalVisits: stats.totalVisits,
+    totalAnalyses: 0,
+    conversionRate: 0,
+    totalPdfs: 0,
+    trafficData15d: [],
+    funnelData: [],
+    traitsData: [],
+    languageData: []
+  });
 });
 
 // Serve ads.txt and app-ads.txt for Google AdSense and AdMob crawler authorization

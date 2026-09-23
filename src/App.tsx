@@ -29,6 +29,7 @@ import {
   Copy,
   Layout,
   BarChart2,
+  ShieldCheck,
   Instagram,
   Linkedin,
   Facebook,
@@ -60,8 +61,15 @@ import VibrantBackground from "./components/VibrantBackground";
 import { AnalysisReportData, GuidedAnswers } from "./types";
 import { generatePDF } from "./lib/pdfGenerator";
 import BlogSection from "./components/BlogSection";
-import { trackEvent, isMixpanelActive } from "./lib/mixpanel";
-import MixpanelDashboard from "./components/MixpanelDashboard";
+import { 
+  fetchVisitorStats, 
+  recordRealVisit, 
+  isOwnerExcluded, 
+  setOwnerExcluded, 
+  trackEvent, 
+  VisitorStats 
+} from "./lib/visitorCounter";
+import { RealVisitorCounterModal } from "./components/RealVisitorCounterModal";
 import { motion } from "motion/react";
 
 // Helper to encode report to a URL safe base64 string
@@ -410,10 +418,9 @@ export default function App() {
     }
     return "es";
   });
-  const [mainView, setMainView] = useState<"analyzer" | "blog" | "mixpanel">("analyzer");
+  const [mainView, setMainView] = useState<"analyzer" | "blog">("analyzer");
   const [activeTab, setActiveTab] = useState<"canvas" | "upload" | "guided" | "presets">("presets");
-  
-  const [showMixpanelDashboard, setShowMixpanelDashboard] = useState(false);
+  const [showVisitorStatsModal, setShowVisitorStatsModal] = useState(false);
 
   // Smooth scroll to the handwriting analyzer tool
   const handleAnalyzerClick = () => {
@@ -446,47 +453,50 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [selectedPreset, setSelectedPreset] = useState<string>("");
 
-  // Persistent blinking visitor counter state
-  const [visitorCount, setVisitorCount] = useState<number>(() => {
-    const saved = localStorage.getItem("graphostudio_visitor_count");
-    if (saved) {
-      const parsed = parseInt(saved, 10);
-      if (!isNaN(parsed) && parsed > 0) return parsed;
-    }
-    // Set a high, highly realistic and professional seed count
-    const seed = 14824;
-    localStorage.setItem("graphostudio_visitor_count", seed.toString());
-    return seed;
+  // Verified Real Visitor Counter state (excluding owner visits)
+  const [visitorStats, setVisitorStats] = useState<VisitorStats>({
+    totalVisits: 0,
+    todayVisits: 0,
+    uniqueVisitors: 0,
+    activeUsers: 0,
+    excludedOwnerVisits: 0,
+    isOwnerExcluded: isOwnerExcluded()
   });
 
-  const [activeUsers, setActiveUsers] = useState<number>(() => Math.floor(Math.random() * 8) + 6); // Starts at a nice number 6-14
-
+  // Record real visit on startup (respecting creator exclusion)
   useEffect(() => {
-    // Increment visitor count slowly to feel live and authentic
-    const visitorInterval = setInterval(() => {
-      setVisitorCount(prev => {
-        const next = prev + (Math.random() > 0.6 ? 1 : 0);
-        localStorage.setItem("graphostudio_visitor_count", next.toString());
-        return next;
-      });
-    }, 15000);
+    recordRealVisit(language).then(stats => {
+      setVisitorStats(stats);
+    });
 
-    // Fluctuate active users slightly to look authentic
-    const activeInterval = setInterval(() => {
-      setActiveUsers(prev => {
-        const delta = Math.floor(Math.random() * 3) - 1; // -1, 0, or 1
-        const next = Math.max(4, Math.min(25, prev + delta));
-        return next;
+    // Refresh real visits stats every 30 seconds
+    const interval = setInterval(() => {
+      fetchVisitorStats().then(stats => {
+        setVisitorStats(stats);
       });
-    }, 6000);
+    }, 30000);
 
     return () => {
-      clearInterval(visitorInterval);
-      clearInterval(activeInterval);
+      clearInterval(interval);
     };
-  }, []);
+  }, [language]);
 
-  // Track key state changes in Mixpanel
+  const handleToggleOwnerExclusion = async (excluded: boolean) => {
+    setOwnerExcluded(excluded);
+    try {
+      await fetch("/api/visits/toggle-owner", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exclude: excluded })
+      });
+    } catch (e) {
+      console.error("Failed to toggle owner exclusion on server:", e);
+    }
+    const updated = await fetchVisitorStats();
+    setVisitorStats({ ...updated, isOwnerExcluded: excluded });
+  };
+
+  // Track application launch
   useEffect(() => {
     trackEvent("Application Launched", {
       initial_language: language,
@@ -963,20 +973,30 @@ ${shareUrl}`;
                 </span>
                 <button
                   type="button"
-                  onClick={() => setMainView("mixpanel")}
-                  className={`text-[9px] uppercase font-bold px-2 py-0.5 rounded-full flex items-center gap-1 transition-all hover:scale-105 cursor-pointer ${
-                    isMixpanelActive()
-                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
-                      : "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20"
-                  }`}
+                  onClick={() => setShowVisitorStatsModal(true)}
+                  className="text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1.5 transition-all hover:scale-105 cursor-pointer bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 shadow-xs"
                   title={
-                    isMixpanelActive()
-                      ? "Mixpanel está Conectado y Activo. Hacé clic para ver el panel de métricas."
-                      : "Mixpanel en Modo Simulación. Hacé clic para conectar tu token real gratis."
+                    visitorStats.isOwnerExcluded
+                      ? (language === "es"
+                          ? "Visitas reales (Tus visitas como creador están excluidas). Hacé clic para ver estadísticas."
+                          : language === "pt"
+                          ? "Visitas reais (Suas visitas como criador estão excluídas). Clique para ver estatísticas."
+                          : "Real verified visits (Your creator visits are excluded). Click to view stats.")
+                      : (language === "es"
+                          ? "Visitas reales registradas. Clic para ver estadísticas."
+                          : language === "pt"
+                          ? "Visitas reais registradas. Clique para ver estatísticas."
+                          : "Verified real visits. Click to view stats.")
                   }
+                  id="header-visitor-pill"
                 >
-                  <span className={`w-1.5 h-1.5 rounded-full ${isMixpanelActive() ? "bg-emerald-500 animate-pulse" : "bg-indigo-500 animate-pulse"}`}></span>
-                  <span>Mixpanel: {isMixpanelActive() ? "Active" : "Simulated"}</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>{visitorStats.totalVisits.toLocaleString()} {language === "es" ? "visitas reales" : language === "pt" ? "visitas reais" : "real visits"}</span>
+                  {visitorStats.isOwnerExcluded && (
+                    <span className="text-[8px] bg-emerald-600/20 text-emerald-800 dark:text-emerald-300 px-1 py-0.2 rounded-xs font-black">
+                      {language === "es" ? "CREADOR" : language === "pt" ? "CRIADOR" : "CREATOR"}
+                    </span>
+                  )}
                 </button>
               </h1>
               <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
@@ -1010,35 +1030,20 @@ ${shareUrl}`;
               <BookOpen className="w-3.5 h-3.5 text-indigo-500 group-hover:text-white" />
               {language === "es" ? "Blog" : language === "pt" ? "Blog" : "Blog"}
             </button>
-            <button
-              type="button"
-              onClick={() => setMainView("mixpanel")}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1 sm:gap-1.5 ${
-                mainView === "mixpanel"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
-              }`}
-            >
-              <BarChart2 className="w-3.5 h-3.5 text-indigo-500 group-hover:text-white" />
-              {language === "es" ? "Mixpanel" : language === "pt" ? "Mixpanel" : "Mixpanel"}
-            </button>
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2">
-            {/* Mixpanel Tracking Dashboard Button */}
+            {/* Real Visitor Counter Details Button */}
             <button
               type="button"
-              onClick={() => setMainView(prev => prev === "mixpanel" ? "analyzer" : "mixpanel")}
-              className={`p-1.5 sm:p-2 border rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-xs ${
-                mainView === "mixpanel"
-                  ? "bg-indigo-600 border-indigo-700 text-white hover:bg-indigo-700"
-                  : "bg-indigo-50 dark:bg-indigo-950/20 hover:bg-indigo-100 dark:hover:bg-indigo-950/40 border-indigo-200/50 dark:border-indigo-900/45 text-indigo-600 dark:text-indigo-400"
-              }`}
-              title={language === "es" ? "Métricas y Configuración de Mixpanel" : language === "pt" ? "Métricas do Mixpanel" : "Mixpanel Metrics"}
+              onClick={() => setShowVisitorStatsModal(true)}
+              className="p-1.5 sm:p-2 border rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-xs bg-emerald-50/60 dark:bg-emerald-950/20 hover:bg-emerald-100 dark:hover:bg-emerald-950/40 border-emerald-200/60 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-300"
+              title={language === "es" ? "Contador de Visitas Reales (Excluyendo las tuyas)" : language === "pt" ? "Contador de Visitas Reais" : "Real Visitor Counter"}
+              id="header-open-visitor-stats-btn"
             >
-              <BarChart2 className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline font-extrabold tracking-wide text-[10px] uppercase">
-                {language === "es" ? "Mixpanel" : language === "pt" ? "Mixpanel" : "Mixpanel"}
+              <Eye className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span className="hidden sm:inline font-black tracking-wide text-[10px]">
+                {visitorStats.totalVisits.toLocaleString()} {language === "es" ? "VISITAS" : language === "pt" ? "VISITAS" : "VISITS"}
               </span>
             </button>
 
@@ -1088,47 +1093,8 @@ ${shareUrl}`;
       {/* Main Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col gap-6">
 
-        {mainView === "mixpanel" && (
-          <div className="w-full">
-            <MixpanelDashboard 
-              language={language} 
-              onClose={() => setMainView("analyzer")} 
-            />
-          </div>
-        )}
-
         {mainView === "analyzer" && (
           <>
-            {/* Real-time Tracking Notice */}
-            <div className="max-w-3xl mx-auto w-full mb-3 print:hidden">
-              <div className="bg-linear-to-r from-indigo-500/10 via-purple-500/10 to-pink-500/10 dark:from-indigo-950/25 dark:via-purple-950/25 dark:to-pink-950/25 p-3.5 rounded-2xl border border-indigo-200/50 dark:border-indigo-900/40 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-3">
-                  <span className="p-2 bg-indigo-600 text-white rounded-xl shrink-0">
-                    <BarChart2 className="w-4 h-4 animate-pulse" />
-                  </span>
-                  <div className="text-left">
-                    <p className="font-extrabold text-slate-800 dark:text-white flex items-center gap-1.5">
-                      <span>{language === "es" ? "📊 ¡Métricas Mixpanel Integradas!" : language === "pt" ? "📊 Métricas do Mixpanel Integradas!" : "📊 Integrated Mixpanel Metrics!"}</span>
-                      <span className="text-[8px] uppercase font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 px-1 rounded-sm">LIVE</span>
-                    </p>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
-                      {language === "es" 
-                        ? "Hacé clic para ver embudos de conversión, rasgos analizados en vivo y telemetría de esta sesión." 
-                        : language === "pt" 
-                        ? "Clique para ver funis de conversão, traços analisados ao vivo e telemetria desta sessão." 
-                        : "Click to inspect conversion funnels, real-time handwriting traits distribution, and live telemetry stream."}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setMainView("mixpanel")}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-black rounded-xl text-[10px] tracking-wider uppercase transition-all shrink-0 cursor-pointer shadow-md shadow-indigo-600/15"
-                >
-                  {language === "es" ? "Ver Dashboard" : language === "pt" ? "Ver Dashboard" : "Open Dashboard"}
-                </button>
-              </div>
-            </div>
 
             {/* Welcome Section */}
             <section className="text-center max-w-3xl mx-auto mt-2 print:hidden" id="hero-welcome">
@@ -2152,34 +2118,66 @@ ${shareUrl}`;
       {/* Interactive Stats & Donation Bar at the bottom of the page */}
       <div className="max-w-3xl mx-auto w-full px-4 mb-8" id="stats-donation-bar">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Visitor Counter */}
-          <div className="bg-white/60 dark:bg-slate-900/40 backdrop-blur-xs px-5 py-3 rounded-2xl border border-slate-200/60 dark:border-slate-800/60 flex items-center justify-between gap-4 shadow-xs">
+          {/* Verified Real Visitor Counter Widget */}
+          <div className="bg-white/70 dark:bg-slate-900/60 backdrop-blur-md p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs" id="footer-real-visitor-counter">
             <div className="flex items-center gap-3">
-              <div className="relative flex h-3 w-3">
-                {/* Blinking/titilante live indicator */}
+              <div className="relative flex h-3.5 w-3.5 shrink-0">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
               </div>
               <div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                  {language === "es" ? "Lectores en línea" : language === "pt" ? "Leitores online" : "Online Readers"}
+                <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
+                  <span>{language === "es" ? "Visitas Reales" : language === "pt" ? "Visitas Reais" : "Real Visits"}</span>
+                  <span className="text-[9px] uppercase font-extrabold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 px-1.5 py-0.2 rounded-sm">
+                    VERIFICADO
+                  </span>
                 </div>
-                <div className="text-lg font-black tracking-tight text-slate-800 dark:text-slate-100 flex items-baseline gap-1.5 leading-none mt-1">
-                  <span className="animate-pulse duration-1000">{activeUsers}</span>
-                  <span className="text-[10px] font-normal text-slate-400 dark:text-slate-500">
-                    {language === "es" ? "activos ahora" : language === "pt" ? "ativos agora" : "active now"}
+                <div className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  <span>{language === "es" ? "Hoy" : language === "pt" ? "Hoje" : "Today"}: <strong className="text-slate-800 dark:text-slate-200 font-bold">{visitorStats.todayVisits}</strong></span>
+                  <span>•</span>
+                  <span>{language === "es" ? "Únicos" : language === "pt" ? "Únicos" : "Unique"}: <strong className="text-slate-800 dark:text-slate-200 font-bold">{visitorStats.uniqueVisitors}</strong></span>
+                  <span>•</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
+                    {visitorStats.activeUsers} {language === "es" ? "en línea" : language === "pt" ? "online" : "online"}
                   </span>
                 </div>
               </div>
             </div>
 
-            <div className="text-right border-l border-slate-200/60 dark:border-slate-800/60 pl-4">
-              <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
-                {language === "es" ? "Visitas totales" : language === "pt" ? "Visitas totais" : "Total visits"}
+            <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 sm:border-l border-slate-200/60 dark:border-slate-800/60 sm:pl-3">
+              <div className="text-left sm:text-right">
+                <div className="text-[10px] text-slate-400 dark:text-slate-500 uppercase tracking-wider font-extrabold">
+                  {language === "es" ? "Total Reales" : language === "pt" ? "Total Reais" : "Total Real"}
+                </div>
+                <div className="text-lg font-black tracking-tight text-indigo-600 dark:text-indigo-400 leading-tight">
+                  {visitorStats.totalVisits.toLocaleString()}
+                </div>
               </div>
-              <div className="text-lg font-black tracking-tight text-indigo-600 dark:text-indigo-400 leading-none mt-1">
-                {visitorCount.toLocaleString()}
-              </div>
+
+              {/* Creator exclusion button */}
+              <button
+                type="button"
+                onClick={() => setShowVisitorStatsModal(true)}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs shrink-0 ${
+                  visitorStats.isOwnerExcluded
+                    ? "bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-emerald-900/50"
+                    : "bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-200/70 dark:border-amber-900/50"
+                }`}
+                title={
+                  visitorStats.isOwnerExcluded 
+                    ? "Tus visitas como creador están siendo excluidas. Hacé clic para ver detalles."
+                    : "Tus visitas se están sumando. Hacé clic para excluirlas."
+                }
+                id="footer-owner-status-btn"
+              >
+                <ShieldCheck className={`w-3.5 h-3.5 ${visitorStats.isOwnerExcluded ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`} />
+                <span className="text-[10px]">
+                  {visitorStats.isOwnerExcluded 
+                    ? (language === "es" ? "Excluido ✓" : language === "pt" ? "Excluído ✓" : "Excluded ✓")
+                    : (language === "es" ? "Excluirme" : language === "pt" ? "Excluir-me" : "Exclude me")
+                  }
+                </span>
+              </button>
             </div>
           </div>
 
@@ -2267,7 +2265,18 @@ ${shareUrl}`;
         </div>
       </footer>
 
-
+      {/* Real Verified Visitor Counter Modal */}
+      <RealVisitorCounterModal
+        isOpen={showVisitorStatsModal}
+        onClose={() => setShowVisitorStatsModal(false)}
+        stats={visitorStats}
+        onRefresh={async () => {
+          const stats = await fetchVisitorStats();
+          setVisitorStats(stats);
+        }}
+        onToggleOwnerExclusion={handleToggleOwnerExclusion}
+        language={language}
+      />
 
     </div>
   );

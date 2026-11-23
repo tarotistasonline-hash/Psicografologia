@@ -1,4 +1,5 @@
 import express from "express";
+import http from "http";
 import path from "path";
 import dotenv from "dotenv";
 import fs from "fs";
@@ -301,9 +302,439 @@ app.get("/app-ads.txt", (req, res) => {
   res.send("google.com, pub-8099027931324700, DIRECT, f08c47fec0942fa0");
 });
 
-// REST API endpoint to analyze handwriting
+// ============================================================================
+// FREEMIUM MONETIZATION & CREDITS ENGINE (3 Free Studies -> Paid / Pro)
+// ============================================================================
+const FREE_STUDIES_LIMIT = 3;
+const MONETIZATION_FILE = path.join(process.cwd(), "monetization_db.json");
+
+interface UserCreditsRecord {
+  clientId: string;
+  ipHashes: string[];
+  freeUsed: number;
+  paidCredits: number;
+  isProUnlimited: boolean;
+  totalStudies: number;
+  lastStudyAt?: number;
+}
+
+interface ActivationCodeRecord {
+  code: string;
+  planId: "pack1" | "pack5" | "pro";
+  creditsToAdd: number;
+  grantsPro: boolean;
+  maxUses: number;
+  usedCount: number;
+  createdAt: number;
+  note?: string;
+}
+
+interface PaymentSettingsRecord {
+  pack1Url: string;
+  pack5Url: string;
+  proUrl: string;
+  pack1Price: string;
+  pack5Price: string;
+  proPrice: string;
+  contactEmail: string;
+  whatsappNumber: string;
+}
+
+interface MonetizationStore {
+  users: Record<string, UserCreditsRecord>;
+  ipFreeCounts: Record<string, number>;
+  codes: ActivationCodeRecord[];
+  verifiedStripeSessions: string[];
+  creatorPinHash?: string;
+  paymentSettings: PaymentSettingsRecord;
+  stats: {
+    totalAiStudies: number;
+    totalPaidUnlocks: number;
+  };
+}
+
+let monetizationStore: MonetizationStore = {
+  users: {},
+  ipFreeCounts: {},
+  codes: [],
+  verifiedStripeSessions: [],
+  paymentSettings: {
+    pack1Url: "https://paypal.me/margsaft/5",
+    pack5Url: "https://mpago.la/21ZzzP7",
+    proUrl: "https://paypal.me/margsaft/5",
+    pack1Price: "$5 USD",
+    pack5Price: "$8.000 Arg",
+    proPrice: "$15 USD",
+    contactEmail: "gracwiew@gmail.com",
+    whatsappNumber: "",
+  },
+  stats: {
+    totalAiStudies: 0,
+    totalPaidUnlocks: 0,
+  },
+};
+
+try {
+  if (fs.existsSync(MONETIZATION_FILE)) {
+    const raw = fs.readFileSync(MONETIZATION_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    monetizationStore = {
+      ...monetizationStore,
+      ...parsed,
+      paymentSettings: {
+        ...monetizationStore.paymentSettings,
+        ...(parsed.paymentSettings || {}),
+      },
+      stats: {
+        ...monetizationStore.stats,
+        ...(parsed.stats || {}),
+      },
+    };
+  } else {
+    fs.writeFileSync(MONETIZATION_FILE, JSON.stringify(monetizationStore, null, 2));
+  }
+} catch (e) {
+  console.error("[Monetization Server] Error loading monetization DB:", e);
+}
+
+async function saveMonetizationToDisk() {
+  try {
+    await fs.promises.writeFile(MONETIZATION_FILE, JSON.stringify(monetizationStore, null, 2));
+  } catch (e) {
+    console.error("[Monetization Server] Error saving monetization DB:", e);
+  }
+}
+
+function hashCreatorPin(pin: string): string {
+  return crypto.createHash("sha256").update(pin + "_grapho_creator_salt_v1").digest("hex");
+}
+
+function verifyCreatorPin(pin?: string): boolean {
+  if (!pin || typeof pin !== "string") return false;
+  const envPin = process.env.CREATOR_PIN;
+  if (envPin) {
+    return pin === envPin;
+  }
+  if (!monetizationStore.creatorPinHash) return false;
+  return hashCreatorPin(pin) === monetizationStore.creatorPinHash;
+}
+
+function getOrCreateUserRecord(clientId: string, ipHash: string): UserCreditsRecord {
+  const safeId = (clientId || `anon_${ipHash}`).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64) || `anon_${ipHash}`;
+  let record = monetizationStore.users[safeId];
+  if (!record) {
+    // Prevent trivial incognito spam on the exact same IP after 6 total free studies on that IP
+    const ipUsed = monetizationStore.ipFreeCounts[ipHash] || 0;
+    const initialFreeUsed = ipUsed >= FREE_STUDIES_LIMIT * 2 ? FREE_STUDIES_LIMIT : 0;
+    record = {
+      clientId: safeId,
+      ipHashes: [ipHash],
+      freeUsed: initialFreeUsed,
+      paidCredits: 0,
+      isProUnlimited: false,
+      totalStudies: 0,
+    };
+    monetizationStore.users[safeId] = record;
+  } else if (!record.ipHashes.includes(ipHash)) {
+    record.ipHashes.push(ipHash);
+  }
+  return record;
+}
+
+function buildQuotaResponse(record: UserCreditsRecord) {
+  const freeUsed = Math.min(record.freeUsed, FREE_STUDIES_LIMIT);
+  const freeRemaining = Math.max(0, FREE_STUDIES_LIMIT - freeUsed);
+  const hasAccess = record.isProUnlimited || freeRemaining > 0 || record.paidCredits > 0;
+  return {
+    clientId: record.clientId,
+    freeUsed,
+    freeLimit: FREE_STUDIES_LIMIT,
+    freeRemaining,
+    paidCredits: record.paidCredits,
+    isProUnlimited: record.isProUnlimited,
+    hasAccess,
+    totalStudies: record.totalStudies,
+    stripeEnabled: Boolean(process.env.STRIPE_SECRET_KEY),
+    paymentSettings: monetizationStore.paymentSettings,
+  };
+}
+
+// 1. Get user's current free studies / paid credits quota
+app.get("/api/credits", (req, res) => {
+  try {
+    const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+    const ipHash = hashIp(rawIp);
+    const clientId = String(req.query.clientId || "");
+    const record = getOrCreateUserRecord(clientId, ipHash);
+    saveMonetizationToDisk();
+    return res.json(buildQuotaResponse(record));
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 2. Redeem a paid activation code
+app.post("/api/credits/redeem", (req, res) => {
+  try {
+    const { clientId, code } = req.body || {};
+    const rawCode = String(code || "").trim().toUpperCase();
+    if (!rawCode) {
+      return res.status(400).json({ error: "Ingresá un código de activación válido." });
+    }
+
+    const codeEntry = monetizationStore.codes.find((c) => c.code.toUpperCase() === rawCode);
+    if (!codeEntry) {
+      return res.status(404).json({ error: "Código no encontrado o inválido." });
+    }
+    if (codeEntry.usedCount >= codeEntry.maxUses) {
+      return res.status(400).json({ error: "Este código ya alcanzó su límite de usos." });
+    }
+
+    const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+    const ipHash = hashIp(rawIp);
+    const record = getOrCreateUserRecord(String(clientId || ""), ipHash);
+
+    if (codeEntry.grantsPro) {
+      record.isProUnlimited = true;
+    }
+    if (codeEntry.creditsToAdd > 0) {
+      record.paidCredits += codeEntry.creditsToAdd;
+    }
+
+    codeEntry.usedCount += 1;
+    monetizationStore.stats.totalPaidUnlocks += 1;
+    saveMonetizationToDisk();
+
+    return res.json({
+      success: true,
+      planId: codeEntry.planId,
+      creditsAdded: codeEntry.creditsToAdd,
+      grantsPro: codeEntry.grantsPro,
+      quota: buildQuotaResponse(record),
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 3. Optional Stripe Checkout Session creation (if STRIPE_SECRET_KEY is configured)
+app.post("/api/checkout/stripe", async (req, res) => {
+  try {
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    if (!stripeKey) {
+      return res.status(400).json({ error: "Stripe no está configurado en el servidor." });
+    }
+    const { clientId, planId, returnUrl } = req.body || {};
+    const plans: Record<string, { name: string; amountCents: number }> = {
+      pack1: { name: "Grafología Pop - 1 Estudio Extra", amountCents: 199 },
+      pack5: { name: "Grafología Pop - Pack 5 Estudios", amountCents: 499 },
+      pro: { name: "Grafología Pop - Pase Pro Ilimitado", amountCents: 999 },
+    };
+    const selected = plans[planId] || plans.pack5;
+    const baseUrl = String(returnUrl || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "");
+
+    const params = new URLSearchParams();
+    params.append("mode", "payment");
+    params.append("success_url", `${baseUrl}/?stripe_session_id={CHECKOUT_SESSION_ID}&plan=${planId}`);
+    params.append("cancel_url", `${baseUrl}/?checkout=cancelled`);
+    params.append("line_items[0][price_data][currency]", "usd");
+    params.append("line_items[0][price_data][product_data][name]", selected.name);
+    params.append("line_items[0][price_data][unit_amount]", String(selected.amountCents));
+    params.append("line_items[0][quantity]", "1");
+    params.append("metadata[clientId]", String(clientId || ""));
+    params.append("metadata[planId]", String(planId || "pack5"));
+
+    const stripeRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${stripeKey}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    });
+    const session = await stripeRes.json();
+    if (!stripeRes.ok) {
+      return res.status(400).json({ error: session.error?.message || "Error creando sesión de Stripe" });
+    }
+    return res.json({ url: session.url, sessionId: session.id });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Verify completed Stripe Checkout Session
+app.post("/api/checkout/verify-stripe", async (req, res) => {
+  try {
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    if (!stripeKey) {
+      return res.status(400).json({ error: "Stripe no configurado." });
+    }
+    const { sessionId, clientId } = req.body || {};
+    if (!sessionId) return res.status(400).json({ error: "Missing sessionId" });
+
+    if (monetizationStore.verifiedStripeSessions.includes(sessionId)) {
+      const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+      const record = getOrCreateUserRecord(String(clientId || ""), hashIp(rawIp));
+      return res.json({ success: true, alreadyVerified: true, quota: buildQuotaResponse(record) });
+    }
+
+    const stripeRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
+      headers: { Authorization: `Bearer ${stripeKey}` },
+    });
+    const session = await stripeRes.json();
+    if (!stripeRes.ok || session.payment_status !== "paid") {
+      return res.status(400).json({ error: "Pago aún no confirmado en Stripe." });
+    }
+
+    const planId = session.metadata?.planId || "pack5";
+    const targetClientId = String(clientId || session.metadata?.clientId || "");
+    const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+    const record = getOrCreateUserRecord(targetClientId, hashIp(rawIp));
+
+    if (planId === "pro") {
+      record.isProUnlimited = true;
+    } else if (planId === "pack1") {
+      record.paidCredits += 1;
+    } else {
+      record.paidCredits += 5;
+    }
+    monetizationStore.verifiedStripeSessions.push(sessionId);
+    monetizationStore.stats.totalPaidUnlocks += 1;
+    saveMonetizationToDisk();
+
+    return res.json({ success: true, quota: buildQuotaResponse(record) });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Creator / Admin Monetization Management Endpoints
+app.get("/api/creator/status", (req, res) => {
+  return res.json({
+    pinConfigured: Boolean(process.env.CREATOR_PIN || monetizationStore.creatorPinHash),
+  });
+});
+
+app.post("/api/creator/setup-pin", (req, res) => {
+  const { pin } = req.body || {};
+  if (process.env.CREATOR_PIN || monetizationStore.creatorPinHash) {
+    return res.status(400).json({ error: "El PIN del creador ya está configurado." });
+  }
+  if (!pin || String(pin).trim().length < 4) {
+    return res.status(400).json({ error: "Elegí un PIN de al menos 4 caracteres." });
+  }
+  monetizationStore.creatorPinHash = hashCreatorPin(String(pin).trim());
+  saveMonetizationToDisk();
+  return res.json({ success: true });
+});
+
+app.post("/api/creator/dashboard", (req, res) => {
+  const { pin } = req.body || {};
+  if (!verifyCreatorPin(pin)) {
+    return res.status(401).json({ error: "PIN de creador incorrecto." });
+  }
+  return res.json({
+    success: true,
+    stats: {
+      ...monetizationStore.stats,
+      totalUsers: Object.keys(monetizationStore.users).length,
+      proUsers: Object.values(monetizationStore.users).filter((u) => u.isProUnlimited).length,
+    },
+    paymentSettings: monetizationStore.paymentSettings,
+    codes: [...monetizationStore.codes].sort((a, b) => b.createdAt - a.createdAt),
+  });
+});
+
+app.post("/api/creator/generate-code", (req, res) => {
+  const { pin, planId = "pack5", maxUses = 1, note = "" } = req.body || {};
+  if (!verifyCreatorPin(pin)) {
+    return res.status(401).json({ error: "PIN de creador incorrecto." });
+  }
+  const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
+  const prefix = planId === "pro" ? "GP-PRO" : planId === "pack1" ? "GP-1" : "GP-5";
+  const newCode: ActivationCodeRecord = {
+    code: `${prefix}-${suffix}`,
+    planId: planId === "pro" || planId === "pack1" ? planId : "pack5",
+    creditsToAdd: planId === "pro" ? 0 : planId === "pack1" ? 1 : 5,
+    grantsPro: planId === "pro",
+    maxUses: Math.max(1, Math.min(1000, Number(maxUses) || 1)),
+    usedCount: 0,
+    createdAt: Date.now(),
+    note: String(note || "").slice(0, 80),
+  };
+  monetizationStore.codes.push(newCode);
+  saveMonetizationToDisk();
+  return res.json({
+    success: true,
+    code: newCode,
+    codes: [...monetizationStore.codes].sort((a, b) => b.createdAt - a.createdAt),
+  });
+});
+
+app.post("/api/creator/delete-code", (req, res) => {
+  const { pin, code } = req.body || {};
+  if (!verifyCreatorPin(pin)) {
+    return res.status(401).json({ error: "PIN de creador incorrecto." });
+  }
+  monetizationStore.codes = monetizationStore.codes.filter((c) => c.code !== code);
+  saveMonetizationToDisk();
+  return res.json({
+    success: true,
+    codes: [...monetizationStore.codes].sort((a, b) => b.createdAt - a.createdAt),
+  });
+});
+
+app.post("/api/creator/update-settings", (req, res) => {
+  const { pin, paymentSettings } = req.body || {};
+  if (!verifyCreatorPin(pin)) {
+    return res.status(401).json({ error: "PIN de creador incorrecto." });
+  }
+  if (paymentSettings && typeof paymentSettings === "object") {
+    monetizationStore.paymentSettings = {
+      pack1Url: String(paymentSettings.pack1Url || monetizationStore.paymentSettings.pack1Url).trim(),
+      pack5Url: String(paymentSettings.pack5Url || monetizationStore.paymentSettings.pack5Url).trim(),
+      proUrl: String(paymentSettings.proUrl || monetizationStore.paymentSettings.proUrl).trim(),
+      pack1Price: String(paymentSettings.pack1Price || monetizationStore.paymentSettings.pack1Price).trim(),
+      pack5Price: String(paymentSettings.pack5Price || monetizationStore.paymentSettings.pack5Price).trim(),
+      proPrice: String(paymentSettings.proPrice || monetizationStore.paymentSettings.proPrice).trim(),
+      contactEmail: String(paymentSettings.contactEmail || monetizationStore.paymentSettings.contactEmail).trim(),
+      whatsappNumber: String(paymentSettings.whatsappNumber || "").trim(),
+    };
+    saveMonetizationToDisk();
+  }
+  return res.json({ success: true, paymentSettings: monetizationStore.paymentSettings });
+});
+
+app.post("/api/creator/reset-quota", (req, res) => {
+  const { pin, clientId } = req.body || {};
+  if (!verifyCreatorPin(pin)) {
+    return res.status(401).json({ error: "PIN de creador incorrecto." });
+  }
+  const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+  const ipHash = hashIp(rawIp);
+  const record = getOrCreateUserRecord(String(clientId || ""), ipHash);
+  record.freeUsed = 0;
+  monetizationStore.ipFreeCounts[ipHash] = 0;
+  saveMonetizationToDisk();
+  return res.json({ success: true, quota: buildQuotaResponse(record) });
+});
+
+// REST API endpoint to analyze handwriting (enforces 3 free studies, then paid credits / Pro)
 app.post("/api/analyze", async (req, res) => {
-  try {    const { image, description, language = "es" } = req.body;
+  try {
+    const { image, description, language = "es", clientId = "" } = req.body;
+    const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+    const ipHash = hashIp(rawIp);
+    const userRecord = getOrCreateUserRecord(String(clientId), ipHash);
+    const currentQuota = buildQuotaResponse(userRecord);
+
+    if (!currentQuota.hasAccess) {
+      return res.status(402).json({
+        error: "Has alcanzado el límite de 3 estudios gratuitos. Desbloqueá más estudios o el Pase Pro para continuar.",
+        code: "QUOTA_EXCEEDED",
+        quota: currentQuota,
+      });
+    }
 
     const ai = getGeminiClient();
 
@@ -463,7 +894,7 @@ Idioma del informe completo: ${language === "en" ? "Inglés (en)" : language ===
     }
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
+      model: "gemini-4-hydrogen",
       contents: contents,
       config: {
         systemInstruction: systemInstruction,
@@ -479,7 +910,25 @@ Idioma del informe completo: ${language === "en" ? "Inglés (en)" : language ===
     }
 
     const reportData = JSON.parse(textResult.trim());
-    return res.json(reportData);
+
+    // Deduct study quota ONLY after a successful AI generation
+    if (!userRecord.isProUnlimited) {
+      if (userRecord.freeUsed < FREE_STUDIES_LIMIT) {
+        userRecord.freeUsed += 1;
+        monetizationStore.ipFreeCounts[ipHash] = (monetizationStore.ipFreeCounts[ipHash] || 0) + 1;
+      } else if (userRecord.paidCredits > 0) {
+        userRecord.paidCredits -= 1;
+      }
+    }
+    userRecord.totalStudies += 1;
+    userRecord.lastStudyAt = Date.now();
+    monetizationStore.stats.totalAiStudies += 1;
+    saveMonetizationToDisk();
+
+    return res.json({
+      ...reportData,
+      _quota: buildQuotaResponse(userRecord),
+    });
 
   } catch (error: any) {
     console.error("Erro na análise grafológica:", error);
@@ -491,10 +940,15 @@ Idioma del informe completo: ${language === "en" ? "Inglés (en)" : language ===
 
 // Serve frontend assets
 async function startServer() {
+  const httpServer = http.createServer(app);
+
   if (process.env.NODE_ENV !== "production") {
-    // In development, integrate Vite middleware
+    // In development, integrate Vite middleware and attach HMR WebSocket to the main HTTP server
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: process.env.DISABLE_HMR === "true" ? false : { server: httpServer },
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -507,7 +961,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`[Psicografologia Server] Running on http://localhost:${PORT}`);
   });
 }

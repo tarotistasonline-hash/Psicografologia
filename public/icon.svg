@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="55%" stop-color="#3730a3" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </linearGradient>
+    <linearGradient id="nibGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde68a" />
+      <stop offset="50%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+  <circle cx="385" cy="125" r="78" fill="#818cf8" opacity="0.16" />
+  <circle cx="120" cy="390" r="95" fill="#f59e0b" opacity="0.10" />
+  <!-- Signature wave stroke -->
+  <path d="M96 368 C142 325, 178 408, 226 352 C258 315, 294 388, 344 338 C374 308, 400 326, 424 316" fill="none" stroke="#ffffff" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" opacity="0.95" />
+  <!-- Pen nib -->
+  <g transform="translate(268, 212) rotate(-32)">
+    <path d="M0 -132 L68 18 L34 78 L-34 78 L-68 18 Z" fill="url(#nibGrad)" stroke="#ffffff" stroke-width="8" stroke-linejoin="round" />
+    <line x1="0" y1="-132" x2="0" y2="4" stroke="#1e1b4b" stroke-width="8" stroke-linecap="round" />
+    <circle cx="0" cy="8" r="13" fill="#1e1b4b" />
+    <rect x="-42" y="78" width="84" height="26" rx="8" fill="#ffffff" opacity="0.92" />
+  </g>
+</svg>

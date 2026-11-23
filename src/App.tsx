@@ -35,7 +35,10 @@ import {
   Facebook,
   Printer,
   Share2,
-  Link
+  Link,
+  History,
+  Crown,
+  Lock
 } from "lucide-react";
 import { 
   ResponsiveContainer, 
@@ -58,7 +61,7 @@ import HandwritingCanvas from "./components/HandwritingCanvas";
 import ImageUploader from "./components/ImageUploader";
 import GuidedAssessment from "./components/GuidedAssessment";
 import VibrantBackground from "./components/VibrantBackground";
-import { AnalysisReportData, GuidedAnswers } from "./types";
+import { AnalysisReportData, GuidedAnswers, StudyHistoryItem, UserQuota } from "./types";
 import { generatePDF } from "./lib/pdfGenerator";
 import BlogSection from "./components/BlogSection";
 import { 
@@ -70,6 +73,13 @@ import {
   VisitorStats 
 } from "./lib/visitorCounter";
 import { RealVisitorCounterModal } from "./components/RealVisitorCounterModal";
+import { PWAInstallButton } from "./components/PWAInstallButton";
+import { OfflineIndicator } from "./components/OfflineIndicator";
+import { PaywallModal } from "./components/PaywallModal";
+import { CreatorMonetizationModal } from "./components/CreatorMonetizationModal";
+import { StudyHistoryView } from "./components/StudyHistoryView";
+import { cacheQuota, fetchUserQuota, getCachedQuota } from "./lib/credits";
+import { deleteStudyFromHistory, getStudyHistory, saveStudyToHistory } from "./lib/studyHistory";
 import { motion } from "motion/react";
 
 // Helper to encode report to a URL safe base64 string
@@ -418,9 +428,16 @@ export default function App() {
     }
     return "es";
   });
-  const [mainView, setMainView] = useState<"analyzer" | "blog">("analyzer");
+  const [mainView, setMainView] = useState<"analyzer" | "history" | "blog">("analyzer");
   const [activeTab, setActiveTab] = useState<"canvas" | "upload" | "guided" | "presets">("presets");
   const [showVisitorStatsModal, setShowVisitorStatsModal] = useState(false);
+
+  // Freemium Monetization (3 free studies -> paid packs / Pro) & Offline History
+  const [userQuota, setUserQuota] = useState<UserQuota>(() => getCachedQuota());
+  const [showPaywallModal, setShowPaywallModal] = useState(false);
+  const [limitReachedTrigger, setLimitReachedTrigger] = useState(false);
+  const [showCreatorMonetizationModal, setShowCreatorMonetizationModal] = useState(false);
+  const [studyHistory, setStudyHistory] = useState<StudyHistoryItem[]>(() => getStudyHistory());
 
   // Smooth scroll to the handwriting analyzer tool
   const handleAnalyzerClick = () => {
@@ -462,6 +479,36 @@ export default function App() {
     excludedOwnerVisits: 0,
     isOwnerExcluded: isOwnerExcluded()
   });
+
+  // Fetch user credits / 3-free-studies quota & verify Stripe return if present
+  useEffect(() => {
+    fetchUserQuota().then((q) => setUserQuota(q));
+
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const stripeSessionId = params.get("stripe_session_id");
+      if (stripeSessionId) {
+        fetch("/api/checkout/verify-stripe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionId: stripeSessionId,
+            clientId: getCachedQuota().clientId,
+          }),
+        })
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.success && data.quota) {
+              setUserQuota(data.quota);
+              cacheQuota(data.quota);
+            }
+            const cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState({}, document.title, cleanUrl);
+          })
+          .catch(() => {});
+      }
+    }
+  }, []);
 
   // Record real visit on startup (respecting creator exclusion)
   useEffect(() => {
@@ -761,9 +808,16 @@ export default function App() {
     }
   };
 
-  // Run Gemini analysis through our local full-stack server
+  // Run Gemini analysis through our local full-stack server (enforcing 3 free studies limit)
   const runAnalysis = async () => {
     setErrorMsg(null);
+
+    if (!userQuota.hasAccess) {
+      setLimitReachedTrigger(true);
+      setShowPaywallModal(true);
+      return;
+    }
+
     setIsLoading(true);
     trackEvent("Analysis Started", { method: activeTab, language });
 
@@ -775,14 +829,14 @@ export default function App() {
         setIsLoading(false);
         return;
       }
-      payload = { image: canvasImage, description: manualText, language };
+      payload = { image: canvasImage, description: manualText, language, clientId: userQuota.clientId };
     } else if (activeTab === "upload") {
       if (!uploadedImage) {
         setErrorMsg(t.btnNoSampleError);
         setIsLoading(false);
         return;
       }
-      payload = { image: uploadedImage, description: manualText, language };
+      payload = { image: uploadedImage, description: manualText, language, clientId: userQuota.clientId };
     } else if (activeTab === "guided") {
       if (!guidedAnswers) {
         setErrorMsg(language === "pt" ? "Por favor, conclua o questionário guiado de 8 perguntas antes." : "Please complete the 8-question guided survey first.");
@@ -793,7 +847,7 @@ export default function App() {
         .map(([key, val]) => `- ${key}: ${val}`)
         .join("\n");
       const fullDesc = `Pesquisa Guiada Respondida pelo Usuário:\n${formattedAnswers}\n\nContexto extra: ${manualText}`;
-      payload = { description: fullDesc, language };
+      payload = { description: fullDesc, language, clientId: userQuota.clientId };
     } else {
       // Presets
       setIsLoading(false);
@@ -807,12 +861,33 @@ export default function App() {
         body: JSON.stringify(payload),
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || "Erro de servidor ao processar amostra.");
+      const rawData = await response.json();
+
+      if (response.status === 402 || rawData?.code === "QUOTA_EXCEEDED") {
+        if (rawData.quota) {
+          setUserQuota(rawData.quota);
+          cacheQuota(rawData.quota);
+        }
+        setLimitReachedTrigger(true);
+        setShowPaywallModal(true);
+        return;
       }
 
-      const data: AnalysisReportData = await response.json();
+      if (!response.ok) {
+        throw new Error(rawData.error || "Erro de servidor ao processar amostra.");
+      }
+
+      const { _quota, ...reportOnly } = rawData;
+      const data: AnalysisReportData = reportOnly as AnalysisReportData;
+      if (_quota) {
+        setUserQuota(_quota);
+        cacheQuota(_quota);
+      }
+
+      const methodKey = activeTab as "canvas" | "upload" | "guided";
+      const updatedHistory = saveStudyToHistory(data, methodKey, language);
+      setStudyHistory(updatedHistory);
+
       setReport(data);
       setIsSharedReport(false);
       trackEvent("Analysis Success", { 
@@ -955,137 +1030,120 @@ ${shareUrl}`;
   const AdSenseBanner = () => null;
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-300 relative overflow-hidden">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-300 relative overflow-hidden pb-20 md:pb-0">
       <VibrantBackground />
       
       {/* Dynamic Header */}
-      <header className="sticky top-0 z-40 w-full bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 print:hidden" id="main-header">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-indigo-600 rounded-xl text-white shadow-md shadow-indigo-600/10">
-              <Brain className="w-5 h-5" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5 flex-wrap">
-                {t.appName}
-                <span className="text-[10px] uppercase font-bold bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-400 px-1.5 py-0.5 rounded-sm">
-                  v3.5
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setShowVisitorStatsModal(true)}
-                  className="text-[9px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1.5 transition-all hover:scale-105 cursor-pointer bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 shadow-xs"
-                  title={
-                    visitorStats.isOwnerExcluded
-                      ? (language === "es"
-                          ? "Visitas reales (Tus visitas como creador están excluidas). Hacé clic para ver estadísticas."
-                          : language === "pt"
-                          ? "Visitas reais (Suas visitas como criador estão excluídas). Clique para ver estatísticas."
-                          : "Real verified visits (Your creator visits are excluded). Click to view stats.")
-                      : (language === "es"
-                          ? "Visitas reales registradas. Clic para ver estadísticas."
-                          : language === "pt"
-                          ? "Visitas reais registradas. Clique para ver estatísticas."
-                          : "Verified real visits. Click to view stats.")
-                  }
-                  id="header-visitor-pill"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>{visitorStats.totalVisits.toLocaleString()} {language === "es" ? "visitas reales" : language === "pt" ? "visitas reais" : "real visits"}</span>
-                  {visitorStats.isOwnerExcluded && (
-                    <span className="text-[8px] bg-emerald-600/20 text-emerald-800 dark:text-emerald-300 px-1 py-0.2 rounded-xs font-black">
-                      {language === "es" ? "CREADOR" : language === "pt" ? "CRIADOR" : "CREATOR"}
-                    </span>
-                  )}
-                </button>
-              </h1>
-              <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">
-                {t.appSlogan}
-              </p>
-            </div>
+      <header className="sticky top-0 z-40 w-full bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 print:hidden" id="main-header">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-6">
+          {/* Zone 1: Brand Wordmark */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            <img
+              src="/pwa-192x192.png"
+              alt="Grafología Pop"
+              className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl shadow-sm shrink-0 object-cover"
+            />
+            <span className="text-base sm:text-lg font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0">
+              {t.appName}
+            </span>
           </div>
 
-          {/* Centered navigation menu for mobile and desktop */}
-          <div className="flex items-center gap-0.5 sm:gap-1 bg-slate-100 dark:bg-slate-950 p-1 rounded-xl text-xs font-bold border border-slate-200/40 dark:border-slate-800">
+          {/* Zone 2: Desktop Navigation Links */}
+          <nav className="hidden md:flex items-center gap-6 text-sm font-semibold text-slate-600 dark:text-slate-300">
             <button
               type="button"
               onClick={handleAnalyzerClick}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+              className={`whitespace-nowrap shrink-0 cursor-pointer py-1 transition-colors ${
                 mainView === "analyzer"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
+                  ? "text-indigo-600 dark:text-indigo-400 underline underline-offset-4"
+                  : "hover:text-slate-950 dark:hover:text-white"
               }`}
             >
               {language === "es" ? "Analizador" : language === "pt" ? "Analisador" : "Analyzer"}
             </button>
             <button
               type="button"
-              onClick={() => setMainView("blog")}
-              className={`px-2.5 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1 sm:gap-1.5 ${
-                mainView === "blog"
-                  ? "bg-indigo-600 text-white shadow-sm"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
+              onClick={() => setMainView("history")}
+              className={`whitespace-nowrap shrink-0 cursor-pointer py-1 transition-colors ${
+                mainView === "history"
+                  ? "text-indigo-600 dark:text-indigo-400 underline underline-offset-4"
+                  : "hover:text-slate-950 dark:hover:text-white"
               }`}
             >
-              <BookOpen className="w-3.5 h-3.5 text-indigo-500 group-hover:text-white" />
-              {language === "es" ? "Blog" : language === "pt" ? "Blog" : "Blog"}
+              {language === "es" ? "Historial" : language === "pt" ? "Histórico" : "History"} ({studyHistory.length})
             </button>
-          </div>
-
-          <div className="flex items-center gap-1 sm:gap-2">
-            {/* Real Visitor Counter Details Button */}
             <button
               type="button"
-              onClick={() => setShowVisitorStatsModal(true)}
-              className="p-1.5 sm:p-2 border rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all shadow-xs bg-emerald-50/60 dark:bg-emerald-950/20 hover:bg-emerald-100 dark:hover:bg-emerald-950/40 border-emerald-200/60 dark:border-emerald-900/40 text-emerald-700 dark:text-emerald-300"
-              title={language === "es" ? "Contador de Visitas Reales (Excluyendo las tuyas)" : language === "pt" ? "Contador de Visitas Reais" : "Real Visitor Counter"}
-              id="header-open-visitor-stats-btn"
+              onClick={() => setMainView("blog")}
+              className={`whitespace-nowrap shrink-0 cursor-pointer py-1 transition-colors ${
+                mainView === "blog"
+                  ? "text-indigo-600 dark:text-indigo-400 underline underline-offset-4"
+                  : "hover:text-slate-950 dark:hover:text-white"
+              }`}
             >
-              <Eye className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span className="hidden sm:inline font-black tracking-wide text-[10px]">
-                {visitorStats.totalVisits.toLocaleString()} {language === "es" ? "VISITAS" : language === "pt" ? "VISITAS" : "VISITS"}
-              </span>
+              Blog
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLimitReachedTrigger(false);
+                setShowPaywallModal(true);
+              }}
+              className="whitespace-nowrap shrink-0 cursor-pointer py-1 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+            >
+              {userQuota.isProUnlimited
+                ? "Pro"
+                : userQuota.freeRemaining > 0
+                ? `${userQuota.freeRemaining}/3 ${language === "en" ? "Free" : "Gratis"}`
+                : userQuota.paidCredits > 0
+                ? `${userQuota.paidCredits} ${language === "en" ? "Credits" : "Créditos"}`
+                : language === "es"
+                ? "Planes Pro"
+                : language === "pt"
+                ? "Planos Pro"
+                : "Upgrade"}
+            </button>
+          </nav>
 
-            <Globe className="w-4 h-4 text-indigo-500 shrink-0 hidden md:block" />
-            <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-1 rounded-xl text-[11px] sm:text-xs font-bold gap-0.5 sm:gap-1 border border-slate-200/40 dark:border-slate-800">
+          {/* Zone 3: Language Switcher + Install App CTA */}
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <div className="flex items-center bg-slate-100 dark:bg-slate-950 p-1 rounded-xl text-[11px] font-bold gap-0.5 border border-slate-200/40 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => changeLanguage("es")}
-                className={`px-2 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                className={`px-2 py-1 rounded-lg cursor-pointer transition-all whitespace-nowrap shrink-0 ${
                   language === "es"
                     ? "bg-indigo-600 text-white shadow-sm"
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
                 }`}
               >
-                <span className="hidden sm:inline">Español</span>
-                <span className="inline sm:hidden">ES</span>
+                ES
               </button>
               <button
                 type="button"
                 onClick={() => changeLanguage("pt")}
-                className={`px-2 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                className={`px-2 py-1 rounded-lg cursor-pointer transition-all whitespace-nowrap shrink-0 ${
                   language === "pt"
                     ? "bg-indigo-600 text-white shadow-sm"
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
                 }`}
               >
-                <span className="hidden sm:inline">Português</span>
-                <span className="inline sm:hidden">PT</span>
+                PT
               </button>
               <button
                 type="button"
                 onClick={() => changeLanguage("en")}
-                className={`px-2 sm:px-3 py-1.5 rounded-lg cursor-pointer transition-all ${
+                className={`px-2 py-1 rounded-lg cursor-pointer transition-all whitespace-nowrap shrink-0 ${
                   language === "en"
                     ? "bg-indigo-600 text-white shadow-sm"
                     : "text-slate-600 dark:text-slate-400 hover:text-slate-950 dark:hover:text-slate-200"
                 }`}
               >
-                <span className="hidden sm:inline">English</span>
-                <span className="inline sm:hidden">EN</span>
+                EN
               </button>
             </div>
+
+            <PWAInstallButton language={language} />
           </div>
         </div>
       </header>
@@ -1533,6 +1591,54 @@ ${shareUrl}`;
                     className="w-full text-xs p-2.5 bg-slate-50 dark:bg-slate-950/80 rounded-lg border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
                   />
 
+                  {/* Free Studies / Paid Credits Meter */}
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-3">
+                    <div className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                      {userQuota.isProUnlimited ? (
+                        <span className="inline-flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-bold">
+                          <Crown className="w-3.5 h-3.5" />
+                          {language === "es" ? "Pase Pro Ilimitado Activo" : language === "pt" ? "Passe Pro Ilimitado Ativo" : "Unlimited Pro Pass Active"}
+                        </span>
+                      ) : userQuota.freeRemaining > 0 ? (
+                        <span>
+                          {language === "es"
+                            ? `Estudios gratuitos: ${userQuota.freeRemaining} de ${userQuota.freeLimit} disponibles`
+                            : language === "pt"
+                            ? `Estudos gratuitos: ${userQuota.freeRemaining} de ${userQuota.freeLimit} disponíveis`
+                            : `Free studies: ${userQuota.freeRemaining} of ${userQuota.freeLimit} left`}
+                        </span>
+                      ) : userQuota.paidCredits > 0 ? (
+                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                          {language === "es"
+                            ? `Créditos disponibles: ${userQuota.paidCredits}`
+                            : language === "pt"
+                            ? `Créditos disponíveis: ${userQuota.paidCredits}`
+                            : `Credits remaining: ${userQuota.paidCredits}`}
+                        </span>
+                      ) : (
+                        <span className="text-amber-600 dark:text-amber-400 font-bold">
+                          {language === "es"
+                            ? "Usaste tus 3 estudios gratuitos"
+                            : language === "pt"
+                            ? "Você usou seus 3 estudos gratuitos"
+                            : "3 free studies used"}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLimitReachedTrigger(false);
+                        setShowPaywallModal(true);
+                      }}
+                      className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer whitespace-nowrap shrink-0"
+                    >
+                      {userQuota.hasAccess
+                        ? language === "es" ? "Ver planes" : language === "pt" ? "Ver planos" : "Plans"
+                        : language === "es" ? "Desbloquear" : language === "pt" ? "Desbloquear" : "Unlock"}
+                    </button>
+                  </div>
+
                   {errorMsg && (
                     <div className="flex items-center gap-2 p-2.5 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 rounded-lg text-xs text-rose-600 dark:text-rose-400">
                       <AlertCircle className="w-4 h-4 shrink-0" />
@@ -1544,16 +1650,31 @@ ${shareUrl}`;
                     type="button"
                     onClick={runAnalysis}
                     disabled={isLoading}
-                    className="w-full py-3 px-4 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-indigo-600/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={`w-full min-h-[48px] py-3 px-4 rounded-xl font-bold text-white transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md disabled:opacity-50 disabled:cursor-not-allowed ${
+                      userQuota.hasAccess
+                        ? "bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/10"
+                        : "bg-amber-600 hover:bg-amber-700 shadow-amber-600/15"
+                    }`}
                   >
                     {isLoading ? (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
                         <span>{t.btnAnalyzing}</span>
                       </>
+                    ) : !userQuota.hasAccess ? (
+                      <>
+                        <Lock className="w-4 h-4" />
+                        <span>
+                          {language === "es"
+                            ? "Desbloquear Más Estudios (3/3 Gratis Usados)"
+                            : language === "pt"
+                            ? "Desbloquear Mais Estudos (3/3 Grátis Usados)"
+                            : "Unlock More Studies (3/3 Free Used)"}
+                        </span>
+                      </>
                     ) : (
                       <>
-                        <Activity className="w-4 h-4 animate-pulse" />
+                        <Activity className="w-4 h-4" />
                         <span>{t.btnAnalyze}</span>
                       </>
                     )}
@@ -1691,48 +1812,7 @@ ${shareUrl}`;
                   </div>
                 </motion.div>
 
-                {/* Elegant Micro-Donation / Support Card (Bilingual / Trilingual) */}
-                <motion.div
-                  variants={reportItemVariants}
-                  className="bg-gradient-to-r from-amber-50/70 to-orange-50/70 dark:from-amber-950/10 dark:to-orange-950/10 p-5 rounded-2xl border border-amber-200/60 dark:border-amber-900/40 shadow-xs flex flex-col md:flex-row items-center justify-between gap-5"
-                >
-                  <div className="flex items-start gap-3.5 text-left">
-                    <div className="p-2.5 bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-xl shrink-0 mt-0.5">
-                      <Coffee className="w-5 h-5 fill-amber-600 dark:fill-amber-400 animate-bounce" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-extrabold text-amber-900 dark:text-amber-300 flex items-center gap-1.5 leading-tight">
-                        {language === "es" 
-                          ? "☕ ¿Te sorprendió la precisión de tu análisis?" 
-                          : language === "pt" 
-                          ? "☕ Ficou surpreso com a precisão da sua análise?" 
-                          : "☕ Surprised by the accuracy of your analysis?"}
-                      </h4>
-                      <p className="text-xs text-amber-800/85 dark:text-slate-300 mt-1 leading-relaxed">
-                        {language === "es" 
-                          ? "Esta herramienta es gratuita y libre de anuncios. Cada análisis consume recursos del servidor. Si el informe te aportó valor o te pareció preciso, ¡un cafecito nos ayuda un montón a seguir manteniéndola gratis!" 
-                          : language === "pt" 
-                          ? "Esta ferramenta é gratuita e livre de anúncios irritantes. Cada análise consome recursos de servidor. Se este laudo te agregou valor ou foi preciso, um cafézinho nos ajuda muito a continuar mantendo-a grátis!" 
-                          : "This tool is free and completely ad-free. Every AI analysis consumes real server resources. If this report was accurate or valuable to you, buying us a coffee helps us a lot to keep providing it for free!"}
-                      </p>
-                    </div>
-                  </div>
-                  <a
-                    href="https://mpago.la/2m7bcUT"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full md:w-auto shrink-0 flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 active:scale-[0.98] text-white text-xs font-bold transition-all shadow-md shadow-amber-500/20 cursor-pointer hover:scale-[1.02]"
-                  >
-                    <span>
-                      {language === "es" 
-                        ? "Invitar un Cafecito" 
-                        : language === "pt" 
-                        ? "Oferecer um Cafézinho" 
-                        : "Buy us a Coffee"}
-                    </span>
-                    <ChevronRight className="w-4 h-4" />
-                  </a>
-                </motion.div>
+
 
                 {/* RECHARTS TRAIT DISTRIBUTION BENTO GRID SECTION */}
                 <motion.div 
@@ -2109,6 +2189,24 @@ ${shareUrl}`;
         </>
         )}
 
+        {mainView === "history" && (
+          <StudyHistoryView
+            history={studyHistory}
+            onSelectStudy={(item) => {
+              setReport(item.report);
+              setSelectedPreset("");
+              setIsSharedReport(false);
+              setMainView("analyzer");
+              setTimeout(() => {
+                document.getElementById("report-column")?.scrollIntoView({ behavior: "smooth" });
+              }, 100);
+            }}
+            onDeleteStudy={(id) => setStudyHistory(deleteStudyFromHistory(id))}
+            onGoToAnalyzer={() => setMainView("analyzer")}
+            language={language}
+          />
+        )}
+
         {mainView === "blog" && (
           <BlogSection language={language} />
         )}
@@ -2181,37 +2279,7 @@ ${shareUrl}`;
             </div>
           </div>
 
-          {/* Mercado Pago Cafecito Link */}
-          <a
-            href="https://mpago.la/2m7bcUT"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="group/don bg-amber-50/50 dark:bg-amber-950/10 hover:bg-amber-50 dark:hover:bg-amber-950/20 transition-all duration-300 px-5 py-3 rounded-2xl border border-amber-200/50 dark:border-amber-900/30 flex items-center justify-between gap-3 shadow-xs cursor-pointer"
-          >
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-amber-100/80 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-xl group-hover/don:scale-110 transition-transform duration-300">
-                <Coffee className="w-4 h-4 fill-amber-600 dark:fill-amber-400 animate-bounce" />
-              </div>
-              <div className="text-left">
-                <p className="text-xs font-bold text-slate-800 dark:text-slate-200 leading-tight">
-                  {language === "es" 
-                    ? "Invítame con un cafecito, que está haciendo mucho frío 🤭" 
-                    : language === "pt" 
-                    ? "Me convide para um cafézinho, pois está fazendo muito frio 🤭" 
-                    : "Invite me for a warm coffee, it's getting really cold out there! 🤭"}
-                </p>
-                <p className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold mt-0.5 group-hover/don:underline flex items-center gap-1">
-                  {language === "es" 
-                    ? "Hacé clic acá para colaborar" 
-                    : language === "pt" 
-                    ? "Clique aqui para colaborar" 
-                    : "Click here to support"}
-                  <ChevronRight className="w-3 h-3" />
-                </p>
-              </div>
-            </div>
-            <span className="text-xl animate-pulse">☕</span>
-          </a>
+
         </div>
       </div>
 
@@ -2224,6 +2292,14 @@ ${shareUrl}`;
               <a href="#" className="hover:underline hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">{language === "pt" ? "Sobre a Grafologia" : "About Graphology"}</a>
               <a href="#" className="hover:underline hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">{language === "pt" ? "Termos de Uso" : "Terms of Service"}</a>
               <a href="#" className="hover:underline hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">{language === "pt" ? "Privacidade" : "Privacy Policy"}</a>
+              <button
+                type="button"
+                onClick={() => setShowCreatorMonetizationModal(true)}
+                className="hover:underline text-indigo-600 dark:text-indigo-400 font-semibold cursor-pointer"
+                id="footer-creator-monetization-btn"
+              >
+                {language === "es" ? "Admin Monetización" : language === "pt" ? "Admin Monetização" : "Creator Monetization"}
+              </button>
             </div>
           </div>
 
@@ -2264,6 +2340,97 @@ ${shareUrl}`;
           </div>
         </div>
       </footer>
+
+      {/* Mobile App Fixed Bottom Tab Bar */}
+      <nav
+        aria-label="Mobile Navigation"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 print:hidden"
+      >
+        <div className="grid grid-cols-4 items-center h-14">
+          <button
+            type="button"
+            onClick={handleAnalyzerClick}
+            className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 cursor-pointer ${
+              mainView === "analyzer"
+                ? "text-indigo-600 dark:text-indigo-400"
+                : "text-slate-500 dark:text-slate-400"
+            }`}
+          >
+            <PenTool className="w-5 h-5" />
+            <span className="text-[10px] font-semibold tracking-tight whitespace-nowrap">
+              {language === "es" ? "Analizar" : language === "pt" ? "Analisar" : "Analyze"}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMainView("history")}
+            className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 cursor-pointer ${
+              mainView === "history"
+                ? "text-indigo-600 dark:text-indigo-400"
+                : "text-slate-500 dark:text-slate-400"
+            }`}
+          >
+            <History className="w-5 h-5" />
+            <span className="text-[10px] font-semibold tracking-tight whitespace-nowrap">
+              {language === "es" ? "Historial" : language === "pt" ? "Histórico" : "History"} ({studyHistory.length})
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMainView("blog")}
+            className={`min-h-[44px] flex flex-col items-center justify-center gap-0.5 cursor-pointer ${
+              mainView === "blog"
+                ? "text-indigo-600 dark:text-indigo-400"
+                : "text-slate-500 dark:text-slate-400"
+            }`}
+          >
+            <BookOpen className="w-5 h-5" />
+            <span className="text-[10px] font-semibold tracking-tight whitespace-nowrap">Blog</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setLimitReachedTrigger(false);
+              setShowPaywallModal(true);
+            }}
+            className="min-h-[44px] flex flex-col items-center justify-center gap-0.5 text-amber-600 dark:text-amber-400 cursor-pointer"
+          >
+            <Crown className="w-5 h-5" />
+            <span className="text-[10px] font-bold tracking-tight whitespace-nowrap">
+              {userQuota.isProUnlimited
+                ? "Pro"
+                : userQuota.freeRemaining > 0
+                ? `${userQuota.freeRemaining}/3`
+                : `${userQuota.paidCredits} cr`}
+            </span>
+          </button>
+        </div>
+      </nav>
+
+      {/* Offline Mode Status Banner */}
+      <OfflineIndicator language={language} />
+
+      {/* Paywall / Upgrade Modal after 3 Free Studies */}
+      <PaywallModal
+        isOpen={showPaywallModal}
+        onClose={() => setShowPaywallModal(false)}
+        quota={userQuota}
+        onQuotaUpdated={(next) => setUserQuota(next)}
+        language={language}
+        limitReachedTrigger={limitReachedTrigger}
+      />
+
+      {/* Creator Monetization Admin Modal */}
+      <CreatorMonetizationModal
+        isOpen={showCreatorMonetizationModal}
+        onClose={() => setShowCreatorMonetizationModal(false)}
+        quota={userQuota}
+        onQuotaUpdated={(next) => setUserQuota(next)}
+        language={language}
+      />
 
       {/* Real Verified Visitor Counter Modal */}
       <RealVisitorCounterModal

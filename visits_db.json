@@ -1,6 +1,14 @@
 {
-  "totalVisits": 0,
+  "totalVisits": 1,
   "excludedOwnerVisits": 0,
   "ownerIps": [],
-  "visits": []
+  "visits": [
+    {
+      "timestamp": 1795467737947,
+      "dateStr": "2026-11-23",
+      "ipHash": "8f496d52cd9cd9d8",
+      "sessionId": "test_visitor_01",
+      "isOwner": false
+    }
+  ]
 }

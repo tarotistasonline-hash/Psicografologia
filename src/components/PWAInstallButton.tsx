@@ -19,7 +19,7 @@ export const PWAInstallButton: React.FC<Props> = ({ language }) => {
     es: {
       btnLabel: "Instalar App",
       iosTitle: "Instalar en iPhone / iPad",
-      browserTitle: "Instalar Grafología Pop como App",
+      browserTitle: "Instalar Grafología Express como App",
       iosStep1: "Tocá el botón Compartir en la barra de Safari.",
       iosStep2: "Deslizá hacia abajo y elegí Añadir a pantalla de inicio.",
       browserDesc:
@@ -32,7 +32,7 @@ export const PWAInstallButton: React.FC<Props> = ({ language }) => {
     pt: {
       btnLabel: "Instalar App",
       iosTitle: "Instalar no iPhone / iPad",
-      browserTitle: "Instalar Grafologia Pop como App",
+      browserTitle: "Instalar Grafologia Express como App",
       iosStep1: "Toque no botão Compartilhar na barra do Safari.",
       iosStep2: "Role para baixo e toque em Adicionar à Tela de Início.",
       browserDesc:
@@ -45,7 +45,7 @@ export const PWAInstallButton: React.FC<Props> = ({ language }) => {
     en: {
       btnLabel: "Install App",
       iosTitle: "Install on iPhone / iPad",
-      browserTitle: "Install Grafología Pop App",
+      browserTitle: "Install Grafología Express App",
       iosStep1: "Tap the Share button in the Safari toolbar.",
       iosStep2: "Scroll down and tap Add to Home Screen.",
       browserDesc:

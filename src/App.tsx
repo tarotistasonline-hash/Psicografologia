@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { 
   Brain, 
-  PenTool, 
+  PenTool,
+  Download, 
   Upload, 
   HelpCircle, 
   Activity, 
@@ -577,7 +578,7 @@ export default function App() {
   // Translation Dictionary
   const t = {
     es: {
-      appName: "Grafología Pop",
+      appName: "Grafología Express",
       appSlogan: "¡Descubrí tu verdadera personalidad! ✨",
       appSub: "¡Escribí una frase y/o estampá tu firma en la pantalla, subí una foto de tus trazos o respondé un cuestionario rápido para revelar tu personalidad, temperamento y energía al instante! 🌟✨",
       languageLabel: "Español",
@@ -647,7 +648,7 @@ export default function App() {
       apiKeyNotice: "Aviso de API"
     },
     pt: {
-      appName: "GraphoStudio",
+      appName: "Grafologia Express",
       appSlogan: "Estúdio de Análise Psicografológica",
       appSub: "Descubra traços profundos de personalidade, temperamento hipocrático, forças, desafios e estado emocional analisando cientificamente a caligrafia com a inteligência do Gemini 3.5.",
       languageLabel: "English",
@@ -717,7 +718,7 @@ export default function App() {
       apiKeyNotice: "Aviso de API"
     },
     en: {
-      appName: "GraphoStudio",
+      appName: "Grafología Express",
       appSlogan: "Psychographology Analysis Studio",
       appSub: "Discover deep personality traits, Hippocratic temperaments, strengths, challenges, and emotional states by scientifically analyzing handwriting with Gemini 3.5 AI.",
       languageLabel: "Português",
@@ -1040,7 +1041,7 @@ ${shareUrl}`;
           <div className="flex items-center gap-2.5 shrink-0">
             <img
               src="/pwa-192x192.png"
-              alt="Grafología Pop"
+              alt="Grafología Express"
               className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl shadow-sm shrink-0 object-cover"
             />
             <span className="text-base sm:text-lg font-extrabold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0">
@@ -2346,7 +2347,7 @@ ${shareUrl}`;
         aria-label="Mobile Navigation"
         className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 print:hidden"
       >
-        <div className="grid grid-cols-4 items-center h-14">
+        <div className="grid grid-cols-5 items-center h-14">
           <button
             type="button"
             onClick={handleAnalyzerClick}
@@ -2388,6 +2389,20 @@ ${shareUrl}`;
           >
             <BookOpen className="w-5 h-5" />
             <span className="text-[10px] font-semibold tracking-tight whitespace-nowrap">Blog</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const btn = document.getElementById("pwa-install-btn");
+              if (btn) btn.click();
+            }}
+            className="min-h-[44px] flex flex-col items-center justify-center gap-0.5 text-indigo-600 dark:text-indigo-400 cursor-pointer"
+          >
+            <Download className="w-5 h-5 animate-bounce" />
+            <span className="text-[10px] font-bold tracking-tight whitespace-nowrap">
+              {language === "es" ? "Instalar" : language === "pt" ? "Instalar" : "Install"}
+            </span>
           </button>
 
           <button

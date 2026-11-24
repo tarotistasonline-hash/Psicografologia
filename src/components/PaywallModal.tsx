@@ -216,12 +216,12 @@ export const PaywallModal: React.FC<Props> = ({
   };
 
   const selectedPlanName = copy.plans[selectedPlan].name;
-  const mailSubject = encodeURIComponent(`Grafología Pop - Activación ${selectedPlanName}`);
+  const mailSubject = encodeURIComponent(`Grafología Express - Activación ${selectedPlanName}`);
   const mailBody = encodeURIComponent(
     `Hola! Realicé el pago por ${selectedPlanName} (${planPriceMap[selectedPlan]}).\nMi ID de app es: ${quota.clientId}\nAdjunto comprobante para recibir mi código de activación.`
   );
   const waText = encodeURIComponent(
-    `Hola! Pagué por ${selectedPlanName} en Grafología Pop. Mi ID es ${quota.clientId}. ¿Me enviás mi código de activación?`
+    `Hola! Pagué por ${selectedPlanName} en Grafología Express. Mi ID es ${quota.clientId}. ¿Me enviás mi código de activación?`
   );
 
   return (

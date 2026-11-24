@@ -1,5 +1,5 @@
 {
-  "name": "Grafología Pop",
+  "name": "Grafología Express",
   "description": "¡Descubre los secretos de tu firma, personalidad, temperamento y energía con este divertido e interactivo test analizado por Inteligencia Artificial! ✨📊",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

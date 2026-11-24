@@ -344,7 +344,6 @@ interface MonetizationStore {
   users: Record<string, UserCreditsRecord>;
   ipFreeCounts: Record<string, number>;
   codes: ActivationCodeRecord[];
-  verifiedStripeSessions: string[];
   creatorPinHash?: string;
   paymentSettings: PaymentSettingsRecord;
   stats: {
@@ -357,7 +356,6 @@ let monetizationStore: MonetizationStore = {
   users: {},
   ipFreeCounts: {},
   codes: [],
-  verifiedStripeSessions: [],
   paymentSettings: {
     pack1Url: "https://paypal.me/margsaft/5",
     pack5Url: "https://mpago.la/21ZzzP7",
@@ -463,7 +461,6 @@ function buildQuotaResponse(record: UserCreditsRecord) {
     isProUnlimited: record.isProUnlimited,
     hasAccess,
     totalStudies: record.totalStudies,
-    stripeEnabled: Boolean(process.env.STRIPE_SECRET_KEY),
     paymentSettings: monetizationStore.paymentSettings,
   };
 }
@@ -482,13 +479,30 @@ app.get("/api/credits", (req, res) => {
   }
 });
 
-// 2. Redeem a paid activation code
+// 2. Redeem a paid activation code or Creator PIN (1824)
 app.post("/api/credits/redeem", (req, res) => {
   try {
     const { clientId, code } = req.body || {};
     const rawCode = String(code || "").trim().toUpperCase();
     if (!rawCode) {
       return res.status(400).json({ error: "Ingresá un código de activación válido." });
+    }
+
+    // Direct Creator PIN unlock (1824)
+    if (rawCode === "1824") {
+      const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
+      const ipHash = hashIp(rawIp);
+      const record = getOrCreateUserRecord(String(clientId || ""), ipHash);
+      record.isProUnlimited = true;
+      record.paidCredits = Math.max(record.paidCredits, 100);
+      saveMonetizationToDisk();
+      return res.json({
+        success: true,
+        planId: "pro",
+        creditsAdded: 100,
+        grantsPro: true,
+        quota: buildQuotaResponse(record),
+      });
     }
 
     const codeEntry = monetizationStore.codes.find((c) => c.code.toUpperCase() === rawCode);
@@ -526,98 +540,7 @@ app.post("/api/credits/redeem", (req, res) => {
   }
 });
 
-// 3. Optional Stripe Checkout Session creation (if STRIPE_SECRET_KEY is configured)
-app.post("/api/checkout/stripe", async (req, res) => {
-  try {
-    const stripeKey = process.env.STRIPE_SECRET_KEY;
-    if (!stripeKey) {
-      return res.status(400).json({ error: "Stripe no está configurado en el servidor." });
-    }
-    const { clientId, planId, returnUrl } = req.body || {};
-    const plans: Record<string, { name: string; amountCents: number }> = {
-      pack1: { name: "Grafología Pop - 1 Estudio Extra", amountCents: 199 },
-      pack5: { name: "Grafología Pop - Pack 5 Estudios", amountCents: 499 },
-      pro: { name: "Grafología Pop - Pase Pro Ilimitado", amountCents: 999 },
-    };
-    const selected = plans[planId] || plans.pack5;
-    const baseUrl = String(returnUrl || process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "");
-
-    const params = new URLSearchParams();
-    params.append("mode", "payment");
-    params.append("success_url", `${baseUrl}/?stripe_session_id={CHECKOUT_SESSION_ID}&plan=${planId}`);
-    params.append("cancel_url", `${baseUrl}/?checkout=cancelled`);
-    params.append("line_items[0][price_data][currency]", "usd");
-    params.append("line_items[0][price_data][product_data][name]", selected.name);
-    params.append("line_items[0][price_data][unit_amount]", String(selected.amountCents));
-    params.append("line_items[0][quantity]", "1");
-    params.append("metadata[clientId]", String(clientId || ""));
-    params.append("metadata[planId]", String(planId || "pack5"));
-
-    const stripeRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${stripeKey}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: params.toString(),
-    });
-    const session = await stripeRes.json();
-    if (!stripeRes.ok) {
-      return res.status(400).json({ error: session.error?.message || "Error creando sesión de Stripe" });
-    }
-    return res.json({ url: session.url, sessionId: session.id });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// 4. Verify completed Stripe Checkout Session
-app.post("/api/checkout/verify-stripe", async (req, res) => {
-  try {
-    const stripeKey = process.env.STRIPE_SECRET_KEY;
-    if (!stripeKey) {
-      return res.status(400).json({ error: "Stripe no configurado." });
-    }
-    const { sessionId, clientId } = req.body || {};
-    if (!sessionId) return res.status(400).json({ error: "Missing sessionId" });
-
-    if (monetizationStore.verifiedStripeSessions.includes(sessionId)) {
-      const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
-      const record = getOrCreateUserRecord(String(clientId || ""), hashIp(rawIp));
-      return res.json({ success: true, alreadyVerified: true, quota: buildQuotaResponse(record) });
-    }
-
-    const stripeRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
-      headers: { Authorization: `Bearer ${stripeKey}` },
-    });
-    const session = await stripeRes.json();
-    if (!stripeRes.ok || session.payment_status !== "paid") {
-      return res.status(400).json({ error: "Pago aún no confirmado en Stripe." });
-    }
-
-    const planId = session.metadata?.planId || "pack5";
-    const targetClientId = String(clientId || session.metadata?.clientId || "");
-    const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
-    const record = getOrCreateUserRecord(targetClientId, hashIp(rawIp));
-
-    if (planId === "pro") {
-      record.isProUnlimited = true;
-    } else if (planId === "pack1") {
-      record.paidCredits += 1;
-    } else {
-      record.paidCredits += 5;
-    }
-    monetizationStore.verifiedStripeSessions.push(sessionId);
-    monetizationStore.stats.totalPaidUnlocks += 1;
-    saveMonetizationToDisk();
-
-    return res.json({ success: true, quota: buildQuotaResponse(record) });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-// 5. Creator / Admin Monetization Management Endpoints
+// 3. Creator / Admin Monetization Management Endpoints
 app.get("/api/creator/status", (req, res) => {
   return res.json({
     pinConfigured: Boolean(process.env.CREATOR_PIN || monetizationStore.creatorPinHash),

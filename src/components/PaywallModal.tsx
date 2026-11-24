@@ -7,8 +7,7 @@ import {
   KeyRound,
   ExternalLink,
   Mail,
-  CreditCard,
-  ShieldCheck,
+  Crown,
 } from "lucide-react";
 import { PlanId, UserQuota } from "../types";
 import { redeemActivationCode } from "../lib/credits";
@@ -33,7 +32,6 @@ export const PaywallModal: React.FC<Props> = ({
   const [selectedPlan, setSelectedPlan] = useState<PlanId>("pack5");
   const [code, setCode] = useState("");
   const [redeeming, setRedeeming] = useState(false);
-  const [stripeLoading, setStripeLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   if (!isOpen) return null;
@@ -43,83 +41,99 @@ export const PaywallModal: React.FC<Props> = ({
       titleReached: "Alcanzaste tus 3 estudios gratuitos",
       titleUpgrade: "Desbloqueá más estudios grafológicos",
       subtitle:
-        "Cada estudio personalizado analiza trazos, presión, inclinación y firma con Inteligencia Artificial. Elegí un pack para continuar sin límites.",
+        "Cada estudio personalizado analiza trazos, presión, inclinación y firma con Inteligencia Artificial. Pagá con Mercado Pago o PayPal para continuar.",
       meterLabel: "Estudios gratuitos usados",
-      popular: "Más elegido",
+      popular: "Recomendado",
       plans: {
         pack1: {
           name: "1 Estudio Extra",
-          desc: "Ideal para un análisis puntual de firma o texto.",
+          desc: "Ideal para un análisis puntual de firma o texto manuscrito.",
           perks: ["1 análisis IA completo", "Descarga de informe PDF", "Guardado en tu historial"],
         },
         pack5: {
           name: "Pack 5 Estudios",
-          desc: "Analizá tu firma, la de tu pareja y amigos.",
-          perks: ["5 análisis IA completos", "Sin vencimiento de créditos", "Informes PDF y enlace compartible"],
+          desc: "Analizá tu firma, la de tu pareja, familiares y amigos.",
+          perks: ["5 análisis IA completos", "Sin vencimiento de créditos", "Informes PDF y acceso offline"],
         },
         pro: {
           name: "Pase Pro Ilimitado",
-          desc: "Uso ilimitado en tu app instalada.",
-          perks: ["Estudios IA ilimitados", "Descargas PDF ilimitadas", "Prioridad en nuevos módulos"],
+          desc: "Uso ilimitado y acceso permanente en tu app.",
+          perks: ["Estudios IA ilimitados", "Descargas PDF ilimitadas", "Acceso prioritario y sin límites"],
         },
       },
-      payNowMp: "Pagar con Mercado Pago / Checkout",
-      payNowStripe: "Pagar con Tarjeta (Stripe)",
-      step1: "1. Realizá el pago del plan elegido",
-      step2: "2. Ingresá tu código de activación",
-      codePlaceholder: "Ej: GP-5-A1B2C3",
-      redeemBtn: "Activar",
+      step1Title: "1. Elegí tu medio de pago (Mercado Pago o PayPal):",
+      mpTitle: "Mercado Pago",
+      mpPrice: "$ 8.000 Arg",
+      mpDesc: "Argentina: Tarjetas de débito/crédito, transferencias y dinero en cuenta.",
+      mpBtn: "Pagar con Mercado Pago ($ 8.000 Arg)",
+      ppTitle: "PayPal",
+      ppPrice: "$ 5 USD",
+      ppDesc: "Internacional: Tarjetas de crédito internacionales y saldo PayPal.",
+      ppBtn: "Pagar con PayPal ($ 5 USD)",
+      step2Title: "2. Activá tu acceso (o ingresá tu PIN de creador):",
+      step2Desc:
+        "Una vez realizado el pago, enviá el comprobante a gracwiew@gmail.com para recibir tu código personal:",
+      codePlaceholder: "Ingresá tu código o PIN 1824...",
+      redeemBtn: "Activar Acceso",
       redeemingBtn: "Validando...",
-      needCode: "¿Ya pagaste? Solicitá tu código al creador:",
-      sendMail: "Enviar comprobante por Email",
-      sendWa: "Enviar por WhatsApp",
-      successMsg: "¡Créditos activados con éxito! Ya podés continuar analizando.",
+      creatorNotice:
+        "👑 ¿Sos el dueño/administrador de la app? Ingresá tu PIN 1824 para desbloqueo Pro Ilimitado inmediato.",
+      sendMail: "Enviar comprobante a gracwiew@gmail.com",
+      successMsg: "¡Acceso activado con éxito! Ya podés continuar analizando caligrafías.",
       close: "Cerrar",
     },
     pt: {
       titleReached: "Você atingiu seus 3 estudos gratuitos",
       titleUpgrade: "Desbloqueie mais estudos grafológicos",
       subtitle:
-        "Cada estudo personalizado analisa traços, pressão, inclinação e assinatura com Inteligência Artificial. Escolha um pacote para continuar.",
+        "Cada estudo personalizado analisa traços, pressão, inclinação e assinatura com Inteligência Artificial. Pague com Mercado Pago ou PayPal.",
       meterLabel: "Estudos gratuitos usados",
-      popular: "Mais escolhido",
+      popular: "Recomendado",
       plans: {
         pack1: {
           name: "1 Estudo Extra",
-          desc: "Ideal para uma análise pontual de assinatura ou texto.",
+          desc: "Ideal para um laudo pontual de assinatura ou texto.",
           perks: ["1 análise IA completa", "Download do laudo em PDF", "Salvo no seu histórico"],
         },
         pack5: {
           name: "Pacote 5 Estudos",
-          desc: "Analise sua assinatura, do seu par e de amigos.",
-          perks: ["5 análises IA completas", "Créditos sem validade", "Laudos em PDF e link compartilhável"],
+          desc: "Analise sua assinatura, de parceiros, família e amigos.",
+          perks: ["5 análises IA completas", "Créditos sem validade", "Laudos em PDF e acesso offline"],
         },
         pro: {
           name: "Passe Pro Ilimitado",
-          desc: "Uso ilimitado no seu app instalado.",
-          perks: ["Estudos IA ilimitados", "Downloads PDF ilimitados", "Prioridade em novos recursos"],
+          desc: "Uso ilimitado e permanente no seu aplicativo.",
+          perks: ["Estudos IA ilimitados", "Downloads PDF ilimitados", "Acesso prioritário"],
         },
       },
-      payNowMp: "Pagar com Mercado Pago / Checkout",
-      payNowStripe: "Pagar com Cartão (Stripe)",
-      step1: "1. Realize o pagamento do plano escolhido",
-      step2: "2. Insira seu código de ativação",
-      codePlaceholder: "Ex: GP-5-A1B2C3",
-      redeemBtn: "Ativar",
+      step1Title: "1. Escolha sua forma de pagamento (Mercado Pago ou PayPal):",
+      mpTitle: "Mercado Pago",
+      mpPrice: "$ 8.000 Arg",
+      mpDesc: "Argentina / América Latina: Cartões e saldo em conta.",
+      mpBtn: "Pagar com Mercado Pago ($ 8.000 Arg)",
+      ppTitle: "PayPal",
+      ppPrice: "$ 5 USD",
+      ppDesc: "Internacional: Cartões de crédito e saldo PayPal.",
+      ppBtn: "Pagar com PayPal ($ 5 USD)",
+      step2Title: "2. Ative seu acesso (ou digite seu PIN do criador):",
+      step2Desc:
+        "Após o pagamento, envie o comprovante para gracwiew@gmail.com para receber seu código:",
+      codePlaceholder: "Digite seu código ou PIN 1824...",
+      redeemBtn: "Ativar Acesso",
       redeemingBtn: "Validando...",
-      needCode: "Já pagou? Solicite seu código ao criador:",
-      sendMail: "Enviar comprovante por Email",
-      sendWa: "Enviar por WhatsApp",
-      successMsg: "Créditos ativados com sucesso! Você já pode continuar analisando.",
+      creatorNotice:
+        "👑 É o criador/administrador do app? Digite seu PIN 1824 para desbloqueio Pro Ilimitado imediato.",
+      sendMail: "Enviar comprovante para gracwiew@gmail.com",
+      successMsg: "Acesso ativado com sucesso! Você já pode continuar suas análises.",
       close: "Fechar",
     },
     en: {
       titleReached: "You have used your 3 free studies",
       titleUpgrade: "Unlock more handwriting studies",
       subtitle:
-        "Each personalized study analyzes strokes, pressure, slant, and signature using AI. Pick a plan to keep exploring.",
+        "Each personalized study analyzes strokes, pressure, slant, and signature with Artificial Intelligence. Pay with PayPal or Mercado Pago.",
       meterLabel: "Free studies used",
-      popular: "Best value",
+      popular: "Recommended",
       plans: {
         pack1: {
           name: "1 Extra Study",
@@ -128,43 +142,41 @@ export const PaywallModal: React.FC<Props> = ({
         },
         pack5: {
           name: "5-Study Pack",
-          desc: "Analyze your signature, partner, and friends.",
-          perks: ["5 full AI analyses", "Credits never expire", "PDF reports & share links"],
+          desc: "Analyze your signature, partner, family, and friends.",
+          perks: ["5 full AI analyses", "Credits never expire", "PDF reports & offline history"],
         },
         pro: {
           name: "Unlimited Pro Pass",
-          desc: "Unlimited access inside your installed app.",
-          perks: ["Unlimited AI studies", "Unlimited PDF exports", "Priority access to updates"],
+          desc: "Unlimited permanent access in your app.",
+          perks: ["Unlimited AI studies", "Unlimited PDF exports", "Priority access"],
         },
       },
-      payNowMp: "Pay via Checkout Link",
-      payNowStripe: "Pay with Card (Stripe)",
-      step1: "1. Complete payment for your selected plan",
-      step2: "2. Enter your activation code",
-      codePlaceholder: "e.g. GP-5-A1B2C3",
-      redeemBtn: "Activate",
-      redeemingBtn: "Checking...",
-      needCode: "Already paid? Request your activation code:",
-      sendMail: "Email Payment Receipt",
-      sendWa: "Send via WhatsApp",
-      successMsg: "Credits activated! You can now run your analysis.",
+      step1Title: "1. Choose your payment method (Mercado Pago or PayPal):",
+      mpTitle: "Mercado Pago",
+      mpPrice: "$ 8.000 Arg",
+      mpDesc: "Argentina / South America: Debit/credit cards and local payment methods.",
+      mpBtn: "Pay with Mercado Pago ($ 8.000 Arg)",
+      ppTitle: "PayPal",
+      ppPrice: "$ 5 USD",
+      ppDesc: "International: Credit cards and PayPal balance.",
+      ppBtn: "Pay with PayPal ($ 5 USD)",
+      step2Title: "2. Activate your access (or enter your creator PIN):",
+      step2Desc:
+        "After payment, send your receipt to gracwiew@gmail.com to receive your activation code:",
+      codePlaceholder: "Enter code or PIN 1824...",
+      redeemBtn: "Activate Access",
+      redeemingBtn: "Validating...",
+      creatorNotice:
+        "👑 Are you the app creator/owner? Enter PIN 1824 for instant unlimited Pro unlock.",
+      sendMail: "Send receipt to gracwiew@gmail.com",
+      successMsg: "Access successfully activated! You can now analyze handwriting.",
       close: "Close",
     },
   }[language];
 
-  const { paymentSettings } = quota;
-
-  const planUrlMap: Record<PlanId, string> = {
-    pack1: paymentSettings.pack1Url || "https://mpago.la/2m7bcUT",
-    pack5: paymentSettings.pack5Url || "https://mpago.la/2m7bcUT",
-    pro: paymentSettings.proUrl || "https://mpago.la/2m7bcUT",
-  };
-
-  const planPriceMap: Record<PlanId, string> = {
-    pack1: paymentSettings.pack1Price || "$1.99 USD",
-    pack5: paymentSettings.pack5Price || "$4.99 USD",
-    pro: paymentSettings.proPrice || "$9.99 USD",
-  };
+  const mpUrl = quota.paymentSettings?.pack5Url || "https://mpago.la/21ZzzP7";
+  const paypalUrl = quota.paymentSettings?.pack1Url || "https://paypal.me/margsaft/5";
+  const contactEmail = quota.paymentSettings?.contactEmail || "gracwiew@gmail.com";
 
   const handleRedeem = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,7 +193,7 @@ export const PaywallModal: React.FC<Props> = ({
           onClose();
         }, 1200);
       } else {
-        setFeedback({ type: "error", text: res.error || "Código inválido" });
+        setFeedback({ type: "error", text: res.error || "Código no encontrado o inválido." });
       }
     } catch {
       setFeedback({ type: "error", text: "Error al validar el código." });
@@ -190,60 +202,31 @@ export const PaywallModal: React.FC<Props> = ({
     }
   };
 
-  const handleStripeCheckout = async () => {
-    setStripeLoading(true);
-    setFeedback(null);
-    try {
-      const res = await fetch("/api/checkout/stripe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          clientId: quota.clientId,
-          planId: selectedPlan,
-          returnUrl: window.location.origin,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.url) {
-        throw new Error(data.error || "No se pudo iniciar Stripe Checkout");
-      }
-      window.location.href = data.url;
-    } catch (err: any) {
-      setFeedback({ type: "error", text: err.message });
-    } finally {
-      setStripeLoading(false);
-    }
-  };
-
-  const selectedPlanName = copy.plans[selectedPlan].name;
-  const mailSubject = encodeURIComponent(`Grafología Express - Activación ${selectedPlanName}`);
+  const mailSubject = encodeURIComponent("Grafología Express - Comprobante de Pago");
   const mailBody = encodeURIComponent(
-    `Hola! Realicé el pago por ${selectedPlanName} (${planPriceMap[selectedPlan]}).\nMi ID de app es: ${quota.clientId}\nAdjunto comprobante para recibir mi código de activación.`
-  );
-  const waText = encodeURIComponent(
-    `Hola! Pagué por ${selectedPlanName} en Grafología Express. Mi ID es ${quota.clientId}. ¿Me enviás mi código de activación?`
+    `Hola!\n\nRealicé el pago para Grafología Express.\nMi ID de usuario es: ${quota.clientId}\n\nAdjunto mi comprobante para recibir mi código de activación.\n\nMuchas gracias!`
   );
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto"
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl my-auto"
+        className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl my-auto text-slate-100"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4">
           <div className="flex items-start gap-3">
-            <div className="p-2.5 rounded-2xl bg-indigo-600 text-white shrink-0">
+            <div className="p-2.5 rounded-2xl bg-indigo-600 text-white shrink-0 shadow-lg shadow-indigo-600/30">
               {limitReachedTrigger ? <Lock className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
             </div>
             <div>
-              <h3 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white leading-tight">
+              <h3 className="text-lg sm:text-xl font-black text-white leading-tight font-serif tracking-tight">
                 {limitReachedTrigger || quota.freeRemaining === 0 ? copy.titleReached : copy.titleUpgrade}
               </h3>
-              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                 {copy.subtitle}
               </p>
             </div>
@@ -251,18 +234,18 @@ export const PaywallModal: React.FC<Props> = ({
           <button
             type="button"
             onClick={onClose}
-            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            className="min-h-[40px] min-w-[40px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
             aria-label={copy.close}
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* 3-Free-Studies Progress Meter */}
-        <div className="mt-4 p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/80 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+        {/* Free Studies Progress Meter */}
+        <div className="mt-4 p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="text-xs font-semibold text-slate-300">
             {copy.meterLabel}:{" "}
-            <span className="font-mono tabular-nums font-bold text-slate-900 dark:text-white">
+            <span className="font-mono tabular-nums font-bold text-white">
               {quota.freeUsed} / {quota.freeLimit}
             </span>
           </div>
@@ -271,96 +254,89 @@ export const PaywallModal: React.FC<Props> = ({
               <div
                 key={idx}
                 className={`h-2 flex-1 rounded-full transition-colors ${
-                  idx < quota.freeUsed
-                    ? "bg-amber-500"
-                    : "bg-slate-200 dark:bg-slate-800"
+                  idx < quota.freeUsed ? "bg-amber-500" : "bg-slate-800"
                 }`}
               />
             ))}
           </div>
         </div>
 
-        {/* Plans Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
-          {(["pack1", "pack5", "pro"] as PlanId[]).map((planKey) => {
-            const isSelected = selectedPlan === planKey;
-            const planInfo = copy.plans[planKey];
-            return (
-              <button
-                key={planKey}
-                type="button"
-                onClick={() => setSelectedPlan(planKey)}
-                className={`text-left p-4 rounded-2xl border transition-all cursor-pointer flex flex-col justify-between relative ${
-                  isSelected
-                    ? "border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/30 ring-2 ring-indigo-600/20"
-                    : "border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/40 hover:border-slate-300 dark:hover:border-slate-700"
-                }`}
-              >
-                <div>
-                  <div className="flex items-center justify-between gap-2 mb-1.5">
-                    <span className="text-xs font-extrabold text-slate-900 dark:text-white">
-                      {planInfo.name}
-                    </span>
-                    {planKey === "pack5" && (
-                      <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">
-                        {copy.popular}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xl font-black font-mono tabular-nums text-indigo-600 dark:text-indigo-400">
-                    {planPriceMap[planKey]}
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5 leading-snug">
-                    {planInfo.desc}
-                  </p>
-                  <ul className="mt-3 space-y-1.5 text-[11px] text-slate-700 dark:text-slate-300">
-                    {planInfo.perks.map((perk, idx) => (
-                      <li key={idx} className="flex items-start gap-1.5">
-                        <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
-                        <span>{perk}</span>
-                      </li>
-                    ))}
-                  </ul>
+        {/* Step 1: Official Payment Methods (Mercado Pago & PayPal) */}
+        <div className="mt-5 pt-4 border-t border-slate-800 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-bold text-slate-200">{copy.step1Title}</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Mercado Pago Card */}
+            <div className="p-4 rounded-2xl border border-sky-500/30 bg-gradient-to-br from-sky-950/30 to-slate-900 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-xs font-extrabold text-sky-400 flex items-center gap-1.5">
+                    <span className="inline-block w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
+                    {copy.mpTitle}
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-300">
+                    Argentina
+                  </span>
                 </div>
-              </button>
-            );
-          })}
-        </div>
+                <div className="text-xl font-black font-mono text-white mt-1">
+                  {copy.mpPrice}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5 leading-snug">
+                  {copy.mpDesc}
+                </p>
+              </div>
 
-        {/* Step 1: Payment CTA */}
-        <div className="mt-5 pt-5 border-t border-slate-100 dark:border-slate-800 space-y-3">
-          <p className="text-xs font-bold text-slate-800 dark:text-slate-200">{copy.step1}</p>
-          <div className="flex flex-col sm:flex-row gap-2.5">
-            <a
-              href={planUrlMap[selectedPlan]}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 min-h-[44px] flex items-center justify-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 shadow-md shadow-indigo-600/20 transition-all"
-            >
-              <CreditCard className="w-4 h-4" />
-              <span>
-                {copy.payNowMp} ({planPriceMap[selectedPlan]})
-              </span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-
-            {quota.stripeEnabled && (
-              <button
-                type="button"
-                onClick={handleStripeCheckout}
-                disabled={stripeLoading}
-                className="flex-1 min-h-[44px] flex items-center justify-center gap-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-bold px-4 py-2.5 transition-all cursor-pointer disabled:opacity-60"
+              <a
+                href={mpUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 min-h-[44px] flex items-center justify-center gap-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold px-4 py-2.5 shadow-lg shadow-sky-600/30 transition-all cursor-pointer"
               >
-                <ShieldCheck className="w-4 h-4" />
-                <span>{copy.payNowStripe}</span>
-              </button>
-            )}
+                <span>{copy.mpBtn}</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
+
+            {/* PayPal Card */}
+            <div className="p-4 rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-950/20 to-slate-900 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <span className="text-xs font-extrabold text-amber-400 flex items-center gap-1.5">
+                    <span className="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                    {copy.ppTitle}
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">
+                    Internacional
+                  </span>
+                </div>
+                <div className="text-xl font-black font-mono text-white mt-1">
+                  {copy.ppPrice}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5 leading-snug">
+                  {copy.ppDesc}
+                </p>
+              </div>
+
+              <a
+                href={paypalUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 min-h-[44px] flex items-center justify-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-4 py-2.5 shadow-lg shadow-amber-600/30 transition-all cursor-pointer"
+              >
+                <span>{copy.ppBtn}</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </div>
           </div>
         </div>
 
         {/* Step 2: Redeem Activation Code */}
-        <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800">
-          <p className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-2">{copy.step2}</p>
+        <div className="mt-5 pt-4 border-t border-slate-800">
+          <p className="text-xs font-bold text-slate-200 mb-1">{copy.step2Title}</p>
+          <p className="text-[11px] text-slate-400 mb-3">{copy.step2Desc}</p>
+
           <form onSubmit={handleRedeem} className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1">
               <KeyRound className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -369,13 +345,13 @@ export const PaywallModal: React.FC<Props> = ({
                 value={code}
                 onChange={(e) => setCode(e.target.value.toUpperCase())}
                 placeholder={copy.codePlaceholder}
-                className="w-full min-h-[44px] pl-9 pr-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                className="w-full min-h-[44px] pl-9 pr-3 py-2 rounded-xl border border-slate-700 bg-slate-950 text-xs font-mono font-bold text-white placeholder-slate-500 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
               />
             </div>
             <button
               type="submit"
               disabled={redeeming || !code.trim()}
-              className="min-h-[44px] px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold transition-colors cursor-pointer shrink-0"
+              className="min-h-[44px] px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold transition-colors cursor-pointer shrink-0 shadow-md shadow-emerald-600/20"
             >
               {redeeming ? copy.redeemingBtn : copy.redeemBtn}
             </button>
@@ -383,39 +359,27 @@ export const PaywallModal: React.FC<Props> = ({
 
           {feedback && (
             <p
-              className={`mt-2 text-xs font-semibold ${
-                feedback.type === "success"
-                  ? "text-emerald-600 dark:text-emerald-400"
-                  : "text-rose-600 dark:text-rose-400"
+              className={`mt-2.5 text-xs font-semibold ${
+                feedback.type === "success" ? "text-emerald-400" : "text-rose-400"
               }`}
             >
               {feedback.text}
             </p>
           )}
 
-          {/* Direct contact / receipt verification fallback */}
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-            <span>{copy.needCode}</span>
-            <div className="flex items-center gap-3">
-              {paymentSettings.contactEmail && (
-                <a
-                  href={`mailto:${paymentSettings.contactEmail}?subject=${mailSubject}&body=${mailBody}`}
-                  className="inline-flex items-center gap-1 font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
-                >
-                  <Mail className="w-3.5 h-3.5" />
-                  <span>{copy.sendMail}</span>
-                </a>
-              )}
-              {paymentSettings.whatsappNumber && (
-                <a
-                  href={`https://wa.me/${paymentSettings.whatsappNumber.replace(/\D/g, "")}?text=${waText}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400 hover:underline"
-                >
-                  <span>{copy.sendWa}</span>
-                </a>
-              )}
+          {/* Quick email button & Creator PIN note */}
+          <div className="mt-4 pt-3 border-t border-slate-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px]">
+            <a
+              href={`mailto:${contactEmail}?subject=${mailSubject}&body=${mailBody}`}
+              className="inline-flex items-center gap-1.5 font-bold text-indigo-400 hover:text-indigo-300 hover:underline cursor-pointer"
+            >
+              <Mail className="w-3.5 h-3.5" />
+              <span>{copy.sendMail}</span>
+            </a>
+
+            <div className="inline-flex items-center gap-1.5 text-amber-300/90 font-medium">
+              <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>{copy.creatorNotice}</span>
             </div>
           </div>
         </div>

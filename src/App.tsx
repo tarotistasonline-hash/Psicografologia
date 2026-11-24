@@ -481,34 +481,9 @@ export default function App() {
     isOwnerExcluded: isOwnerExcluded()
   });
 
-  // Fetch user credits / 3-free-studies quota & verify Stripe return if present
+  // Fetch user credits / 3-free-studies quota
   useEffect(() => {
     fetchUserQuota().then((q) => setUserQuota(q));
-
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const stripeSessionId = params.get("stripe_session_id");
-      if (stripeSessionId) {
-        fetch("/api/checkout/verify-stripe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            sessionId: stripeSessionId,
-            clientId: getCachedQuota().clientId,
-          }),
-        })
-          .then((r) => r.json())
-          .then((data) => {
-            if (data.success && data.quota) {
-              setUserQuota(data.quota);
-              cacheQuota(data.quota);
-            }
-            const cleanUrl = window.location.origin + window.location.pathname;
-            window.history.replaceState({}, document.title, cleanUrl);
-          })
-          .catch(() => {});
-      }
-    }
   }, []);
 
   // Record real visit on startup (respecting creator exclusion)

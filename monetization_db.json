@@ -1,8 +1,38 @@
 {
-  "users": {},
+  "users": {
+    "gp_65f9ffaaba3348ad": {
+      "clientId": "gp_65f9ffaaba3348ad",
+      "ipHashes": [
+        "921ee338ee359b86"
+      ],
+      "freeUsed": 0,
+      "paidCredits": 0,
+      "isProUnlimited": false,
+      "totalStudies": 0
+    },
+    "test-client-123": {
+      "clientId": "test-client-123",
+      "ipHashes": [
+        "8f496d52cd9cd9d8"
+      ],
+      "freeUsed": 0,
+      "paidCredits": 100,
+      "isProUnlimited": true,
+      "totalStudies": 0
+    },
+    "verify_clean_state": {
+      "clientId": "verify_clean_state",
+      "ipHashes": [
+        "8f496d52cd9cd9d8"
+      ],
+      "freeUsed": 0,
+      "paidCredits": 0,
+      "isProUnlimited": false,
+      "totalStudies": 0
+    }
+  },
   "ipFreeCounts": {},
   "codes": [],
-  "verifiedStripeSessions": [],
   "paymentSettings": {
     "pack1Url": "https://paypal.me/margsaft/5",
     "pack5Url": "https://mpago.la/21ZzzP7",
@@ -16,5 +46,6 @@
   "stats": {
     "totalAiStudies": 0,
     "totalPaidUnlocks": 0
-  }
+  },
+  "creatorPinHash": "5b615ef2c43cc29156101f29c6e276d8d239a2cc5a45e8b51fb4fce01307947b"
 }

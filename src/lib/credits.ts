@@ -57,7 +57,6 @@ export function getCachedQuota(): UserQuota {
     isProUnlimited: false,
     hasAccess: true,
     totalStudies: 0,
-    stripeEnabled: false,
     paymentSettings: DEFAULT_PAYMENT_SETTINGS,
   };
 }

@@ -74,7 +74,6 @@ export interface UserQuota {
   isProUnlimited: boolean;
   hasAccess: boolean;
   totalStudies: number;
-  stripeEnabled?: boolean;
   paymentSettings: PaymentSettings;
 }
 

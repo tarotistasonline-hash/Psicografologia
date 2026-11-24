@@ -79,7 +79,7 @@ export const CreatorMonetizationModal: React.FC<Props> = ({
       genBtn: "Crear Código",
       codesTitle: "Códigos Generados",
       noCodes: "Todavía no generaste códigos de activación.",
-      settingsTitle: "Links de Pago (Mercado Pago / Checkout) y Precios",
+      settingsTitle: "Links de Pago (Mercado Pago / PayPal) y Precios",
       saveSettings: "Guardar Configuración",
       resetTestBtn: "Reiniciar mis 3 estudios gratis (Prueba)",
       close: "Cerrar",

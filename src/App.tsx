@@ -924,10 +924,15 @@ export default function App() {
     return labels[dominantKey as keyof typeof labels]?.[lang] || dominantKey;
   };
 
+  const getPublicShareUrl = () => {
+    const origin = window.location.origin;
+    return origin.replace("-dev-", "-pre-");
+  };
+
   const handleCopyShareLink = () => {
     if (!report) return;
     try {
-      const shareUrl = `${window.location.origin}${window.location.pathname}?report=${encodeReportToUrl(report)}`;
+      const shareUrl = `${getPublicShareUrl()}${window.location.pathname}?report=${encodeReportToUrl(report)}`;
       navigator.clipboard.writeText(shareUrl);
       setCopiedLink(true);
       setTimeout(() => setCopiedLink(false), 2000);
@@ -941,7 +946,7 @@ export default function App() {
     if (!report) return;
     
     // Generate the share URL
-    const shareUrl = `${window.location.origin}${window.location.pathname}?report=${encodeReportToUrl(report)}`;
+    const shareUrl = `${getPublicShareUrl()}${window.location.pathname}?report=${encodeReportToUrl(report)}`;
     
     // Formatted summary text based on language
     let shareTitle = "";
@@ -949,7 +954,7 @@ export default function App() {
     
     if (language === "es") {
       shareTitle = "Mi Análisis de Personalidad Grafológico";
-      shareText = `🔍 ¡Mira mi análisis de personalidad grafológico de GraphoStudio! ✨
+      shareText = `🔍 ¡Mira mi análisis de personalidad grafológico de Grafología Express! ✨
 
 ✍️ Mi temperamento dominante: ${getDominantTemperamentLabel("es")}
 📝 Perfil Psicológico:
@@ -959,7 +964,7 @@ export default function App() {
 ${shareUrl}`;
     } else if (language === "pt") {
       shareTitle = "Meu Laudo de Personalidade Grafológico";
-      shareText = `🔍 Veja minha análise de personalidade grafológica do GraphoStudio! ✨
+      shareText = `🔍 Veja minha análise de personalidade grafológica do Grafologia Express! ✨
 
 ✍️ Meu temperamento dominante: ${getDominantTemperamentLabel("pt")}
 📝 Perfil Psicológico:
@@ -969,7 +974,7 @@ ${shareUrl}`;
 ${shareUrl}`;
     } else {
       shareTitle = "My Handwriting Personality Analysis";
-      shareText = `🔍 Check out my handwriting personality analysis from GraphoStudio! ✨
+      shareText = `🔍 Check out my handwriting personality analysis from Grafología Express! ✨
 
 ✍️ My dominant temperament: ${getDominantTemperamentLabel("en")}
 📝 Psychological Profile:
@@ -1031,11 +1036,11 @@ ${shareUrl}`;
   const AdSenseBanner = () => null;
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-300 relative overflow-hidden pb-20 md:pb-0">
+    <div className="dark min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans relative overflow-hidden pb-20 md:pb-0">
       <VibrantBackground />
       
       {/* Dynamic Header */}
-      <header className="sticky top-0 z-40 w-full bg-white/85 dark:bg-slate-900/85 backdrop-blur-md border-b border-slate-200/80 dark:border-slate-800 print:hidden" id="main-header">
+      <header className="sticky top-0 z-40 w-full bg-slate-900/85 backdrop-blur-md border-b border-slate-800 print:hidden" id="main-header">
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-6">
           {/* Zone 1: Brand Wordmark */}
           <div className="flex items-center gap-2.5 shrink-0">
@@ -1161,15 +1166,43 @@ ${shareUrl}`;
             <Sparkles className="w-3.5 h-3.5" />
             {language === "es" ? "🎉 ¡Test de Personalidad Grafológica Divertido!" : language === "pt" ? "Psicologia Científica & Perícia Grafotécnica" : "Scientific Handwriting Analysis & Personality Profiling"}
           </span>
-          <h2 className="text-3xl sm:text-4xl font-sans font-black text-slate-900 dark:text-white tracking-tight leading-tight">
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-serif tracking-tight leading-tight sm:leading-snug text-slate-900 dark:text-white max-w-3xl mx-auto font-normal">
             {language === "es" ? (
-              <span className="inline-flex items-center gap-2 justify-center flex-wrap">
-                <span className="animate-blink-yellow-orange">Qué revela tu letra acerca de tu personalidad</span>
+              <span className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+                <span className="font-serif italic font-normal text-slate-800 dark:text-slate-100">
+                  ¿Qué revela
+                </span>
+                <span className="font-handwriting text-4xl sm:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 dark:from-indigo-400 dark:via-purple-300 dark:to-pink-400 bg-clip-text text-transparent px-1.5 transform -rotate-2 inline-block drop-shadow-xs">
+                  tu letra
+                </span>
+                <span className="font-serif italic font-normal text-slate-800 dark:text-slate-100">
+                  acerca de tu personalidad?
+                </span>
               </span>
             ) : language === "pt" ? (
-              "Sua Caligrafia Revela Quem Você É"
+              <span className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+                <span className="font-serif italic font-normal text-slate-800 dark:text-slate-100">
+                  O que a
+                </span>
+                <span className="font-handwriting text-4xl sm:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 dark:from-indigo-400 dark:via-purple-300 dark:to-pink-400 bg-clip-text text-transparent px-1.5 transform -rotate-2 inline-block drop-shadow-xs">
+                  sua caligrafia
+                </span>
+                <span className="font-serif italic font-normal text-slate-800 dark:text-slate-100">
+                  revela sobre você?
+                </span>
+              </span>
             ) : (
-              "Your Handwriting Reveals Who You Are"
+              <span className="inline-flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+                <span className="font-serif italic font-normal text-slate-800 dark:text-slate-100">
+                  What does
+                </span>
+                <span className="font-handwriting text-4xl sm:text-5xl lg:text-6xl font-bold bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 dark:from-indigo-400 dark:via-purple-300 dark:to-pink-400 bg-clip-text text-transparent px-1.5 transform -rotate-2 inline-block drop-shadow-xs">
+                  your handwriting
+                </span>
+                <span className="font-serif italic font-normal text-slate-800 dark:text-slate-100">
+                  reveal about you?
+                </span>
+              </span>
             )}
           </h2>
           <p className="text-sm sm:text-base text-slate-600 dark:text-slate-300 mt-3 leading-relaxed">
@@ -1183,10 +1216,10 @@ ${shareUrl}`;
               <BookOpen className="w-4 h-4 text-indigo-600 dark:text-indigo-400 group-hover:scale-110 transition-transform" />
               <span>
                 {language === "es"
-                  ? "📚 ¡Nuevo! Visitá nuestro Blog de Grafología Científica"
+                  ? "📚 ¡Nuevo! Blog Científico"
                   : language === "pt"
-                  ? "📚 Novo! Visite o nosso Blog de Grafologia Científica"
-                  : "📚 New! Visit our Scientific Graphology Blog"}
+                  ? "📚 Novo! Blog Científico"
+                  : "📚 New! Scientific Blog"}
               </span>
               <ChevronRight className="w-3.5 h-3.5 text-indigo-500 group-hover:translate-x-1 transition-transform" />
             </button>
@@ -2288,8 +2321,8 @@ ${shareUrl}`;
       <footer className="w-full bg-slate-100 dark:bg-slate-950 border-t border-slate-200/80 dark:border-slate-900/80 mt-12 py-8 text-xs text-slate-500 dark:text-slate-400 print:hidden" id="main-footer">
         <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="text-center md:text-left">
-            <p>© 2026 GraphoStudio — {language === "pt" ? "Psicologia Baseada em Evidências" : "Evidence-Based Psychographology"}</p>
-            <div className="flex justify-center md:justify-start gap-4 mt-2">
+            <p>© 2026 Grafología Express — {language === "es" ? "Análisis de Caligrafía y Personalidad con IA" : language === "pt" ? "Psicologia Baseada em Evidências" : "Evidence-Based Psychographology"}</p>
+            <div className="flex flex-wrap justify-center md:justify-start gap-4 mt-2">
               <a href="#" className="hover:underline hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">{language === "pt" ? "Sobre a Grafologia" : "About Graphology"}</a>
               <a href="#" className="hover:underline hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">{language === "pt" ? "Termos de Uso" : "Terms of Service"}</a>
               <a href="#" className="hover:underline hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">{language === "pt" ? "Privacidade" : "Privacy Policy"}</a>

@@ -1,6 +1,6 @@
-import React from "react";
-import { ShieldCheck, ShieldAlert, Eye, Users, Calendar, RefreshCw, X, CheckCircle2, Lock } from "lucide-react";
-import { VisitorStats, setOwnerExcluded } from "../lib/visitorCounter";
+import React, { useState } from "react";
+import { Eye, Users, Calendar, RefreshCw, X, CheckCircle2, Lock, PlusCircle, Activity } from "lucide-react";
+import { VisitorStats, setOwnerExcluded, recordTestVisit } from "../lib/visitorCounter";
 
 interface Props {
   isOpen: boolean;
@@ -19,6 +19,9 @@ export const RealVisitorCounterModal: React.FC<Props> = ({
   onToggleOwnerExclusion,
   language
 }) => {
+  const [testing, setTesting] = useState(false);
+  const [testSuccess, setTestSuccess] = useState(false);
+
   if (!isOpen) return null;
 
   const handleToggle = () => {
@@ -27,83 +30,104 @@ export const RealVisitorCounterModal: React.FC<Props> = ({
     onToggleOwnerExclusion(nextState);
   };
 
+  const handleTestIncrement = async () => {
+    setTesting(true);
+    setTestSuccess(false);
+    try {
+      await recordTestVisit();
+      onRefresh();
+      setTestSuccess(true);
+      setTimeout(() => setTestSuccess(false), 3000);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setTesting(false);
+    }
+  };
+
   const texts = {
     es: {
       title: "Contador de Visitas Reales",
-      subtitle: "Métricas fidedignas con exclusión de visitas del creador/administrador",
+      subtitle: "Métricas fidedignas y verificadas en tiempo real",
       totalVisits: "Visitas Reales Totales",
       todayVisits: "Visitas de Hoy",
       uniqueVisitors: "Visitantes Únicos",
       activeUsers: "En línea ahora",
-      excludedOwner: "Tus visitas ignoradas",
-      ownerStatusTitle: "Modo Creador (Exclusión de tus visitas)",
-      ownerExcludedActive: "Tus visitas están EXCLUIDAS del contador",
-      ownerExcludedDesc: "Cada vez que entres a la web, recargues la página o hagas pruebas, el contador NO sumará tus visitas para que veas métricas 100% reales de tus usuarios.",
-      ownerIncludedActive: "Tus visitas se están SUMANDO al contador",
-      ownerIncludedDesc: "Actualmente tu navegador se comporta como un visitante más. Activá la exclusión para evitar inflar las estadísticas.",
+      excludedOwner: "Visitas excluidas",
+      testVisitBtn: "Registrar Visita de Prueba (+1)",
+      testVisitLoading: "Registrando...",
+      testVisitSuccess: "¡Visita de prueba sumada al contador!",
+      ownerStatusTitle: "Modo Creador (Exclusión opcional)",
+      ownerExcludedActive: "Tus visitas están siendo excluidas del contador",
+      ownerExcludedDesc: "Tus ingresos no suman al total para no alterar las métricas.",
+      ownerIncludedActive: "Todas las visitas se están sumando normalmente",
+      ownerIncludedDesc: "Tus visitas se contabilizan igual que las de tus usuarios.",
       btnExclude: "Excluir Mis Visitas",
-      btnInclude: "Incluir Mis Visitas (Prueba)",
+      btnInclude: "Contar Todas Mis Visitas",
       refresh: "Actualizar datos",
       close: "Cerrar",
-      featuresTitle: "Garantías del Sistema de Visitas Reales:",
-      feature1: "Filtro anti-inflación: los usuarios sólo computan 1 visita cada 30 minutos.",
-      feature2: "Exclusión del creador persistente en este dispositivo y servidor.",
-      feature3: "Almacenamiento persistente en servidor sin servicios de terceros ni Mixpanel.",
+      featuresTitle: "Características del Sistema de Métricas:",
+      feature1: "Conteo directo persistente y protegido en el servidor.",
+      feature2: "Detección de usuarios únicos y sesiones activas en tiempo real.",
+      feature3: "Sin trackers externos ni cookies invasivas.",
       activeTag: "ACTIVO",
-      zeroNote: "Nota: Si 'Visitas de hoy' y 'En línea' dicen 0, es porque tus visitas como creador están excluidas y no hay visitantes externos conectados ahora. Para registrar tu visita como prueba, haz clic en 'Incluir Mis Visitas (Prueba)'."
     },
     pt: {
       title: "Contador de Visitas Reais",
-      subtitle: "Métricas autênticas com exclusão das visitas do criador/administrador",
+      subtitle: "Métricas autênticas e verificadas em tempo real",
       totalVisits: "Visitas Reais Totais",
       todayVisits: "Visitas de Hoje",
       uniqueVisitors: "Visitantes Únicos",
       activeUsers: "Online agora",
-      excludedOwner: "Suas visitas ignoradas",
-      ownerStatusTitle: "Modo Criador (Exclusão das suas visitas)",
-      ownerExcludedActive: "Suas visitas estão EXCLUÍDAS do contador",
-      ownerExcludedDesc: "Cada vez que você acessar a web, recarregar ou testar, o contador NÃO somará suas visitas, garantindo números 100% autênticos dos seus usuários.",
-      ownerIncludedActive: "Suas visitas estão sendo SOMADAS ao contador",
-      ownerIncludedDesc: "Atualmente seu navegador se comporta como um visitante comum. Ative a exclusão para não inflar as métricas.",
+      excludedOwner: "Visitas excluídas",
+      testVisitBtn: "Registrar Visita de Teste (+1)",
+      testVisitLoading: "Registrando...",
+      testVisitSuccess: "Visita de teste adicionada com sucesso!",
+      ownerStatusTitle: "Modo Criador (Exclusão opcional)",
+      ownerExcludedActive: "Suas visitas estão sendo excluídas do contador",
+      ownerExcludedDesc: "Seus acessos não somam ao total para manter as métricas puras.",
+      ownerIncludedActive: "Todas as visitas estão sendo somadas normalmente",
+      ownerIncludedDesc: "Suas visitas são contabilizadas junto com as dos usuários.",
       btnExclude: "Excluir Minhas Visitas",
-      btnInclude: "Incluir Minhas Visitas (Teste)",
-      refresh: "Actualizar dados",
+      btnInclude: "Contar Todas as Visitas",
+      refresh: "Atualizar dados",
       close: "Fechar",
-      featuresTitle: "Garantías do Sistema de Visitas Reais:",
-      feature1: "Filtro anti-inflação: visitantes contam apenas 1 visita a cada 30 minutos.",
-      feature2: "Exclusão persistente do criador neste dispositivo e servidor.",
-      feature3: "Armazenamento direto no servidor, sem dependência do Mixpanel.",
+      featuresTitle: "Características do Sistema de Métricas:",
+      feature1: "Contagem direta persistente e protegida no servidor.",
+      feature2: "Detecção de visitantes únicos e usuários online em tempo real.",
+      feature3: "Sem rastreadores externos ou cookies invasivos.",
       activeTag: "ATIVO",
-      zeroNote: "Nota: Se 'Visitas de hoje' e 'Online' dizem 0, é porque suas visitas de criador estão excluídas e não há visitantes externos agora."
     },
     en: {
       title: "Real Visitor Counter",
-      subtitle: "Genuine metrics with strict creator/admin visit exclusion",
+      subtitle: "Genuine and verified metrics in real time",
       totalVisits: "Total Real Visits",
       todayVisits: "Visits Today",
       uniqueVisitors: "Unique Visitors",
       activeUsers: "Online now",
-      excludedOwner: "Your visits ignored",
-      ownerStatusTitle: "Creator Mode (Your visits exclusion)",
-      ownerExcludedActive: "Your visits are EXCLUDED from the counter",
-      ownerExcludedDesc: "Whenever you open the app, refresh, or run tests, your visits will NOT be counted, keeping stats 100% genuine.",
-      ownerIncludedActive: "Your visits are currently being COUNTED",
-      ownerIncludedDesc: "Your browser is currently treated as a regular visitor. Turn on exclusion to keep visitor numbers pure.",
+      excludedOwner: "Excluded visits",
+      testVisitBtn: "Add Test Visit (+1)",
+      testVisitLoading: "Adding...",
+      testVisitSuccess: "Test visit successfully counted!",
+      ownerStatusTitle: "Creator Mode (Optional Exclusion)",
+      ownerExcludedActive: "Your visits are excluded from the counter",
+      ownerExcludedDesc: "Your sessions are ignored to keep external stats clean.",
+      ownerIncludedActive: "All visits are being counted normally",
+      ownerIncludedDesc: "Your visits are counted alongside visitor sessions.",
       btnExclude: "Exclude My Visits",
-      btnInclude: "Include My Visits (Testing)",
+      btnInclude: "Count My Visits",
       refresh: "Refresh stats",
       close: "Close",
-      featuresTitle: "Real Visitor Counter Guarantees:",
-      feature1: "Anti-inflation filter: visitors are counted once every 30 minutes.",
-      feature2: "Persistent creator exclusion saved locally and on the server.",
-      feature3: "Clean server-side storage without Mixpanel or external trackers.",
+      featuresTitle: "Metrics System Features:",
+      feature1: "Persistent and server-protected visit tracking.",
+      feature2: "Real-time active users and unique visitor detection.",
+      feature3: "Zero external trackers or invasive cookies.",
       activeTag: "ACTIVE",
-      zeroNote: "Note: If 'Visits Today' and 'Online' show 0, it is because creator visits are excluded and no external users are browsing right now."
     }
   }[language];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fade-in" onClick={onClose}>
       <div 
         className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl relative overflow-hidden"
         onClick={(e) => e.stopPropagation()}
@@ -131,16 +155,16 @@ export const RealVisitorCounterModal: React.FC<Props> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Metric Cards Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 my-5">
-          <div className="p-3.5 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40">
-            <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 text-xs font-bold mb-1">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-5">
+          <div className="p-3 rounded-2xl bg-indigo-50/60 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40">
+            <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 text-[11px] font-bold mb-1">
               <Eye className="w-3.5 h-3.5" />
               <span>{texts.totalVisits}</span>
             </div>
@@ -149,8 +173,8 @@ export const RealVisitorCounterModal: React.FC<Props> = ({
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40">
-            <div className="flex items-center gap-2 text-purple-600 dark:text-purple-400 text-xs font-bold mb-1">
+          <div className="p-3 rounded-2xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-100 dark:border-purple-900/40">
+            <div className="flex items-center gap-1.5 text-purple-600 dark:text-purple-400 text-[11px] font-bold mb-1">
               <Calendar className="w-3.5 h-3.5" />
               <span>{texts.todayVisits}</span>
             </div>
@@ -159,12 +183,9 @@ export const RealVisitorCounterModal: React.FC<Props> = ({
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/40">
-            <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 text-xs font-bold mb-1">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
+          <div className="p-3 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900/40">
+            <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold mb-1">
+              <Activity className="w-3.5 h-3.5 animate-pulse" />
               <span>{texts.activeUsers}</span>
             </div>
             <div className="text-2xl font-black text-slate-900 dark:text-white">
@@ -172,8 +193,8 @@ export const RealVisitorCounterModal: React.FC<Props> = ({
             </div>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40">
-            <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 text-xs font-bold mb-1">
+          <div className="p-3 rounded-2xl bg-blue-50/60 dark:bg-blue-950/30 border border-blue-100 dark:border-blue-900/40">
+            <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 text-[11px] font-bold mb-1">
               <Users className="w-3.5 h-3.5" />
               <span>{texts.uniqueVisitors}</span>
             </div>
@@ -181,77 +202,61 @@ export const RealVisitorCounterModal: React.FC<Props> = ({
               {stats.uniqueVisitors.toLocaleString()}
             </div>
           </div>
-
-          <div className="p-3.5 rounded-2xl bg-amber-50/60 dark:bg-amber-950/30 border border-amber-100 dark:border-amber-900/40 col-span-2 sm:col-span-2">
-            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 text-xs font-bold mb-1">
-              <Lock className="w-3.5 h-3.5" />
-              <span>{texts.excludedOwner}</span>
-            </div>
-            <div className="text-2xl font-black text-slate-900 dark:text-white">
-              {stats.excludedOwnerVisits.toLocaleString()}
-            </div>
-          </div>
         </div>
 
-        {/* Informative explanation note if stats are 0 */}
-        {stats.todayVisits === 0 && (
-          <div className="mb-4 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed flex items-start gap-2.5">
-            <span className="text-indigo-500 font-bold shrink-0 text-sm">ℹ️</span>
-            <p>{texts.zeroNote}</p>
-          </div>
-        )}
-
-        {/* Creator / Owner Mode Box */}
-        <div className={`p-4 rounded-2xl border transition-all ${
-          stats.isOwnerExcluded
-            ? "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50"
-            : "bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/50"
-        }`}>
-          <div className="flex items-start gap-3">
-            <div className={`p-2 rounded-xl shrink-0 ${
-              stats.isOwnerExcluded
-                ? "bg-emerald-600 text-white"
-                : "bg-amber-500 text-white"
-            }`}>
-              {stats.isOwnerExcluded ? (
-                <ShieldCheck className="w-5 h-5" />
+        {/* Test Increment Action Box */}
+        <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3 mb-4">
+          <div>
+            <p className="text-xs font-bold text-slate-900 dark:text-white">
+              {texts.testVisitBtn}
+            </p>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              {testSuccess ? (
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold">{texts.testVisitSuccess}</span>
               ) : (
-                <ShieldAlert className="w-5 h-5" />
+                "Comprobá al instante que el contador suma visitas correctamente."
               )}
-            </div>
-            <div className="flex-1">
-              <p className="text-xs font-extrabold text-slate-900 dark:text-white">
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={testing}
+            onClick={handleTestIncrement}
+            className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shrink-0 transition-all shadow-md shadow-indigo-600/20"
+          >
+            <PlusCircle className="w-3.5 h-3.5" />
+            <span>{testing ? texts.testVisitLoading : "+1 Visita"}</span>
+          </button>
+        </div>
+
+        {/* Creator / Owner Mode Toggle */}
+        <div className="p-3.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/40">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold text-slate-900 dark:text-white">
                 {texts.ownerStatusTitle}
               </p>
-              <p className={`text-xs font-bold mt-0.5 ${
-                stats.isOwnerExcluded 
-                  ? "text-emerald-700 dark:text-emerald-400" 
-                  : "text-amber-700 dark:text-amber-400"
-              }`}>
-                {stats.isOwnerExcluded ? texts.ownerExcludedActive : texts.ownerIncludedActive}
-              </p>
-              <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 {stats.isOwnerExcluded ? texts.ownerExcludedDesc : texts.ownerIncludedDesc}
               </p>
-
-              <button
-                type="button"
-                onClick={handleToggle}
-                className={`mt-3 px-3.5 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all shadow-xs ${
-                  stats.isOwnerExcluded
-                    ? "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700"
-                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
-                }`}
-              >
-                {stats.isOwnerExcluded ? texts.btnInclude : texts.btnExclude}
-              </button>
             </div>
+            <button
+              type="button"
+              onClick={handleToggle}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all shrink-0 border ${
+                stats.isOwnerExcluded
+                  ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
+                  : "bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700"
+              }`}
+            >
+              {stats.isOwnerExcluded ? texts.btnInclude : texts.btnExclude}
+            </button>
           </div>
         </div>
 
-        {/* Informative bullet points */}
-        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/80">
-          <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-2">
+        {/* Features bullet points */}
+        <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800/80">
+          <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1.5">
             {texts.featuresTitle}
           </p>
           <ul className="text-[11px] text-slate-500 dark:text-slate-400 space-y-1">

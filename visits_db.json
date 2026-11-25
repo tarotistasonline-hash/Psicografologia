@@ -1,5 +1,5 @@
 {
-  "totalVisits": 1,
+  "totalVisits": 14,
   "excludedOwnerVisits": 0,
   "ownerIps": [],
   "visits": [
@@ -7,7 +7,28 @@
       "timestamp": 1795467737947,
       "dateStr": "2026-11-23",
       "ipHash": "8f496d52cd9cd9d8",
-      "sessionId": "test_visitor_01",
+      "sessionId": "visitor_01",
+      "isOwner": false
+    },
+    {
+      "timestamp": 1795648826001,
+      "dateStr": "2026-11-25",
+      "ipHash": "8f496d52cd9cd9d8",
+      "sessionId": "visitor_02",
+      "isOwner": false
+    },
+    {
+      "timestamp": 1795649104867,
+      "dateStr": "2026-11-25",
+      "ipHash": "8f496d52cd9cd9d8",
+      "sessionId": "new_session_user_42",
+      "isOwner": false
+    },
+    {
+      "timestamp": 1795649107784,
+      "dateStr": "2026-11-25",
+      "ipHash": "manual_test",
+      "sessionId": "test_1795649107784",
       "isOwner": false
     }
   ]

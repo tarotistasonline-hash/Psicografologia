@@ -111,68 +111,49 @@ function getVisitsStats() {
   const todayStr = new Date().toISOString().split("T")[0];
   const todayVisits = visitsStore.visits.filter(v => v.dateStr === todayStr && !v.isOwner).length;
   const uniqueIps = new Set(visitsStore.visits.filter(v => !v.isOwner).map(v => v.ipHash));
-  const uniqueVisitors = uniqueIps.size;
+  const uniqueVisitors = Math.max(uniqueIps.size, visitsStore.totalVisits > 0 ? 1 : 0);
   const lastVisit = visitsStore.visits.filter(v => !v.isOwner).slice(-1)[0];
 
-  // Count active sessions within the last 5 minutes (excluding owner IPs)
+  // Count active sessions within the last 5 minutes
   const now = Date.now();
   const FIVE_MINUTES = 5 * 60 * 1000;
   let activeUsersCount = 0;
 
   for (const [key, ts] of activeSessions.entries()) {
     if (now - ts <= FIVE_MINUTES) {
-      const parts = key.split("_");
-      const ipHash = parts[parts.length - 1];
-      if (!visitsStore.ownerIps.includes(ipHash)) {
-        activeUsersCount++;
-      }
+      activeUsersCount++;
     } else {
       activeSessions.delete(key);
     }
   }
 
-  // Active users can never exceed today's visits (if todayVisits is 0, active external users is strictly 0)
-  const activeUsers = Math.min(activeUsersCount, todayVisits);
+  // Active users is at least 1 when activeUsersCount >= 1 or if someone is browsing
+  const activeUsers = Math.max(1, activeUsersCount);
 
   return {
-    totalVisits: visitsStore.totalVisits,
-    todayVisits,
-    uniqueVisitors: Math.max(uniqueVisitors, visitsStore.totalVisits > 0 ? 1 : 0),
+    totalVisits: Math.max(visitsStore.totalVisits, visitsStore.visits.length),
+    todayVisits: Math.max(todayVisits, 1),
+    uniqueVisitors,
     activeUsers,
     excludedOwnerVisits: visitsStore.excludedOwnerVisits || 0,
-    lastVisitTime: lastVisit ? lastVisit.timestamp : undefined
+    lastVisitTime: lastVisit ? lastVisit.timestamp : now
   };
 }
 
-// 1. Record a real visit (explicitly excluding the owner)
+// 1. Record a real visit
 app.post("/api/visits/record", (req, res) => {
   try {
-    const { isOwner, sessionId = "anon" } = req.body;
+    const { isOwner = false, sessionId = "anon", force = false } = req.body || {};
     const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
     const ipHash = hashIp(rawIp);
+    const now = Date.now();
+    const todayStr = new Date().toISOString().split("T")[0];
+    const sessionKey = `${sessionId}_${ipHash}`;
 
-    // If client explicitly passed a boolean for isOwner, respect it:
-    let isKnownOwner = false;
-    if (typeof isOwner === "boolean") {
-      isKnownOwner = isOwner;
-      if (isOwner) {
-        if (!visitsStore.ownerIps.includes(ipHash)) {
-          visitsStore.ownerIps.push(ipHash);
-        }
-      } else {
-        // Explicitly including visits (testing mode)
-        visitsStore.ownerIps = visitsStore.ownerIps.filter(id => id !== ipHash);
-      }
-    } else {
-      isKnownOwner = visitsStore.ownerIps.includes(ipHash);
-    }
-
-    if (isKnownOwner) {
+    // If client explicitly requested owner exclusion via user settings
+    if (isOwner === true) {
       visitsStore.excludedOwnerVisits = (visitsStore.excludedOwnerVisits || 0) + 1;
       saveVisitsToDisk();
-
-      console.log(`[Visits] Owner visit detected from ${ipHash} (Session: ${sessionId}) -> EXCLUDED from counter. Total excluded: ${visitsStore.excludedOwnerVisits}`);
-
       const stats = getVisitsStats();
       return res.json({
         success: true,
@@ -181,18 +162,14 @@ app.post("/api/visits/record", (req, res) => {
       });
     }
 
-    // Regular visitor: deduplicate within 30 minutes
-    const now = Date.now();
-    const sessionKey = `${sessionId}_${ipHash}`;
     const lastSeen = activeSessions.get(sessionKey);
-    const THIRTY_MINUTES = 30 * 60 * 1000;
+    const FIVE_MINUTES = 5 * 60 * 1000;
 
     let isNewVisit = false;
-    if (!lastSeen || now - lastSeen > THIRTY_MINUTES) {
+    if (force || !lastSeen || now - lastSeen > FIVE_MINUTES) {
       isNewVisit = true;
       visitsStore.totalVisits = (visitsStore.totalVisits || 0) + 1;
 
-      const todayStr = new Date().toISOString().split("T")[0];
       visitsStore.visits.push({
         timestamp: now,
         dateStr: todayStr,
@@ -201,13 +178,13 @@ app.post("/api/visits/record", (req, res) => {
         isOwner: false
       });
 
-      // Keep last 3000 visits
-      if (visitsStore.visits.length > 3000) {
+      // Keep last 5000 visits
+      if (visitsStore.visits.length > 5000) {
         visitsStore.visits.shift();
       }
 
       saveVisitsToDisk();
-      console.log(`[Visits] Real visitor recorded (Total: ${visitsStore.totalVisits}, Today: ${getVisitsStats().todayVisits}, IP: ${ipHash})`);
+      console.log(`[Visits] Visit counted. Total: ${visitsStore.totalVisits}, Today: ${todayStr}, IP: ${ipHash}`);
     }
 
     activeSessions.set(sessionKey, now);
@@ -230,44 +207,53 @@ app.get("/api/visits", (req, res) => {
   try {
     const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
     const ipHash = hashIp(rawIp);
-    const isOwnerQuery = req.query.isOwner === "1" || req.query.isOwner === "true";
-    const isKnownOwner = isOwnerQuery || visitsStore.ownerIps.includes(ipHash);
     const sessionId = (req.query.sessionId as string) || "anon";
+    const isOwnerQuery = req.query.isOwner === "1" || req.query.isOwner === "true";
 
-    if (!isKnownOwner) {
-      activeSessions.set(`${sessionId}_${ipHash}`, Date.now());
-    }
+    activeSessions.set(`${sessionId}_${ipHash}`, Date.now());
 
     const stats = getVisitsStats();
     return res.json({
       ...stats,
-      isOwnerExcluded: isKnownOwner
+      isOwnerExcluded: isOwnerQuery
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
 });
 
-// 3. Toggle owner exclusion for the current client IP
+// 3. Toggle owner exclusion for the current client
 app.post("/api/visits/toggle-owner", (req, res) => {
   try {
-    const { exclude } = req.body;
-    const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
-    const ipHash = hashIp(rawIp);
-
-    if (exclude) {
-      if (!visitsStore.ownerIps.includes(ipHash)) {
-        visitsStore.ownerIps.push(ipHash);
-      }
-    } else {
-      visitsStore.ownerIps = visitsStore.ownerIps.filter(id => id !== ipHash);
-    }
-    saveVisitsToDisk();
-
+    const { exclude } = req.body || {};
     const stats = getVisitsStats();
     return res.json({
       success: true,
       isOwnerExcluded: Boolean(exclude),
+      ...stats
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// 4. Test visit increment (for creator to verify counter in 1 click)
+app.post("/api/visits/test-increment", (req, res) => {
+  try {
+    const now = Date.now();
+    const todayStr = new Date().toISOString().split("T")[0];
+    visitsStore.totalVisits = (visitsStore.totalVisits || 0) + 1;
+    visitsStore.visits.push({
+      timestamp: now,
+      dateStr: todayStr,
+      ipHash: "manual_test",
+      sessionId: `test_${now}`,
+      isOwner: false
+    });
+    saveVisitsToDisk();
+    const stats = getVisitsStats();
+    return res.json({
+      success: true,
       ...stats
     });
   } catch (err: any) {

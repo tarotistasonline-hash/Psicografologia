@@ -2261,28 +2261,23 @@ ${shareUrl}`;
                 </div>
               </div>
 
-              {/* Creator exclusion button */}
+              {/* View stats modal button */}
               <button
                 type="button"
                 onClick={() => setShowVisitorStatsModal(true)}
-                className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs shrink-0 ${
-                  visitorStats.isOwnerExcluded
-                    ? "bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-emerald-900/50"
-                    : "bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 dark:hover:bg-amber-900/40 text-amber-700 dark:text-amber-300 border border-amber-200/70 dark:border-amber-900/50"
-                }`}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs shrink-0 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 border border-indigo-200/70 dark:border-indigo-800"
                 title={
-                  visitorStats.isOwnerExcluded 
-                    ? "Tus visitas como creador están siendo excluidas. Hacé clic para ver detalles."
-                    : "Tus visitas se están sumando. Hacé clic para excluirlas."
+                  language === "es" 
+                    ? "Ver estadísticas de visitas en tiempo real"
+                    : language === "pt" 
+                    ? "Ver estatísticas de visitas em tempo real" 
+                    : "View real-time visitor statistics"
                 }
                 id="footer-owner-status-btn"
               >
-                <ShieldCheck className={`w-3.5 h-3.5 ${visitorStats.isOwnerExcluded ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`} />
-                <span className="text-[10px]">
-                  {visitorStats.isOwnerExcluded 
-                    ? (language === "es" ? "Excluido ✓" : language === "pt" ? "Excluído ✓" : "Excluded ✓")
-                    : (language === "es" ? "Excluirme" : language === "pt" ? "Excluir-me" : "Exclude me")
-                  }
+                <Eye className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span className="text-[11px]">
+                  {language === "es" ? "Ver Métricas" : language === "pt" ? "Ver Métricas" : "View Stats"}
                 </span>
               </button>
             </div>

@@ -861,11 +861,11 @@ async function startServer() {
   const httpServer = http.createServer(app);
 
   if (process.env.NODE_ENV !== "production") {
-    // In development, integrate Vite middleware and attach HMR WebSocket to the main HTTP server
+    // In development, integrate Vite middleware with HMR disabled (cloud preview environment)
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: process.env.DISABLE_HMR === "true" ? false : { server: httpServer },
+        hmr: false,
       },
       appType: "spa",
     });

@@ -53,11 +53,12 @@ function getGeminiClient() {
   return aiClient;
 }
 
-// Dedicated Real Visits Counter Database (Mixpanel removed, owner visits excluded)
+// Dedicated Real Visits Counter Database
 interface VisitLog {
   timestamp: number;
   dateStr: string;
   ipHash: string;
+  visitorId?: string;
   sessionId: string;
   isOwner?: boolean;
 }
@@ -77,8 +78,9 @@ let visitsStore: VisitsStore = {
   visits: []
 };
 
-// Simple active sessions cache in memory to prevent duplicate counts within 30 minutes
+// Active sessions and short-window duplicate guard (3s) to protect React StrictMode double-mount
 const activeSessions = new Map<string, number>();
+const recordedPageLoads = new Map<string, number>();
 
 // Helper to hash IP for privacy
 function hashIp(ip: string): string {
@@ -90,29 +92,35 @@ try {
   if (fs.existsSync(VISITS_FILE)) {
     const raw = fs.readFileSync(VISITS_FILE, "utf-8");
     visitsStore = JSON.parse(raw);
-    console.log(`[Visits Server] Loaded visits DB: ${visitsStore.totalVisits} real visits, ${visitsStore.excludedOwnerVisits} excluded owner visits.`);
+    console.log(`[Visits Server] Loaded visits DB: ${visitsStore.totalVisits} real visits.`);
   } else {
-    // Check if there was any historical visit count
     fs.writeFileSync(VISITS_FILE, JSON.stringify(visitsStore, null, 2));
   }
 } catch (e) {
   console.error("[Visits Server] Error loading visits database:", e);
 }
 
-async function saveVisitsToDisk() {
+function saveVisitsToDisk() {
   try {
-    await fs.promises.writeFile(VISITS_FILE, JSON.stringify(visitsStore, null, 2));
+    fs.writeFileSync(VISITS_FILE, JSON.stringify(visitsStore, null, 2));
   } catch (e) {
     console.error("[Visits Server] Error saving visits to disk:", e);
   }
 }
 
+function setNoCacheHeaders(res: express.Response) {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+}
+
 function getVisitsStats() {
   const todayStr = new Date().toISOString().split("T")[0];
-  const todayVisits = visitsStore.visits.filter(v => v.dateStr === todayStr && !v.isOwner).length;
-  const uniqueIps = new Set(visitsStore.visits.filter(v => !v.isOwner).map(v => v.ipHash));
-  const uniqueVisitors = Math.max(uniqueIps.size, visitsStore.totalVisits > 0 ? 1 : 0);
-  const lastVisit = visitsStore.visits.filter(v => !v.isOwner).slice(-1)[0];
+  const nonOwnerVisits = visitsStore.visits.filter(v => !v.isOwner);
+  const todayVisits = nonOwnerVisits.filter(v => v.dateStr === todayStr).length;
+  const uniqueKeys = new Set(nonOwnerVisits.map(v => v.visitorId || v.ipHash));
+  const uniqueVisitors = Math.max(uniqueKeys.size, visitsStore.totalVisits > 0 ? 1 : 0);
+  const lastVisit = nonOwnerVisits.slice(-1)[0];
 
   // Count active sessions within the last 5 minutes
   const now = Date.now();
@@ -127,12 +135,18 @@ function getVisitsStats() {
     }
   }
 
-  // Active users is at least 1 when activeUsersCount >= 1 or if someone is browsing
+  // Clean up old page load keys (> 10 minutes)
+  for (const [key, ts] of recordedPageLoads.entries()) {
+    if (now - ts > 10 * 60 * 1000) {
+      recordedPageLoads.delete(key);
+    }
+  }
+
   const activeUsers = Math.max(1, activeUsersCount);
 
   return {
     totalVisits: Math.max(visitsStore.totalVisits, visitsStore.visits.length),
-    todayVisits: Math.max(todayVisits, 1),
+    todayVisits,
     uniqueVisitors,
     activeUsers,
     excludedOwnerVisits: visitsStore.excludedOwnerVisits || 0,
@@ -140,17 +154,21 @@ function getVisitsStats() {
   };
 }
 
-// 1. Record a real visit
+// 1. Record a real visit (counts every genuine page visit / new tab, preventing only StrictMode double-fire)
 app.post("/api/visits/record", (req, res) => {
   try {
-    const { isOwner = false, sessionId = "anon", force = false } = req.body || {};
+    setNoCacheHeaders(res);
+    const { isOwner = false, sessionId = "anon", visitorId, pageLoadId, force = false } = req.body || {};
     const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
     const ipHash = hashIp(rawIp);
     const now = Date.now();
     const todayStr = new Date().toISOString().split("T")[0];
-    const sessionKey = `${sessionId}_${ipHash}`;
+    const activeKey = visitorId ? `v_${visitorId}` : `${sessionId}_${ipHash}`;
 
-    // If client explicitly requested owner exclusion via user settings
+    // Always mark session as currently active/online
+    activeSessions.set(activeKey, now);
+
+    // Only exclude if user explicitly enabled owner exclusion
     if (isOwner === true) {
       visitsStore.excludedOwnerVisits = (visitsStore.excludedOwnerVisits || 0) + 1;
       saveVisitsToDisk();
@@ -162,32 +180,33 @@ app.post("/api/visits/record", (req, res) => {
       });
     }
 
-    const lastSeen = activeSessions.get(sessionKey);
-    const FIVE_MINUTES = 5 * 60 * 1000;
+    // Deduplicate same pageLoadId (prevents React StrictMode double-counting on single mount)
+    const loadKey = pageLoadId ? String(pageLoadId) : activeKey;
+    const alreadyRecordedThisLoad = recordedPageLoads.get(loadKey);
+    const duplicateWindowMs = pageLoadId ? 60 * 60 * 1000 : 3000;
 
     let isNewVisit = false;
-    if (force || !lastSeen || now - lastSeen > FIVE_MINUTES) {
+    if (force || !alreadyRecordedThisLoad || now - alreadyRecordedThisLoad > duplicateWindowMs) {
       isNewVisit = true;
+      recordedPageLoads.set(loadKey, now);
       visitsStore.totalVisits = (visitsStore.totalVisits || 0) + 1;
 
       visitsStore.visits.push({
         timestamp: now,
         dateStr: todayStr,
         ipHash,
-        sessionId,
+        visitorId: visitorId ? String(visitorId) : undefined,
+        sessionId: String(sessionId),
         isOwner: false
       });
 
-      // Keep last 5000 visits
       if (visitsStore.visits.length > 5000) {
         visitsStore.visits.shift();
       }
 
       saveVisitsToDisk();
-      console.log(`[Visits] Visit counted. Total: ${visitsStore.totalVisits}, Today: ${todayStr}, IP: ${ipHash}`);
+      console.log(`[Visits] Visit counted. Total: ${visitsStore.totalVisits}, Today: ${todayStr}, Visitor: ${visitorId || ipHash}`);
     }
-
-    activeSessions.set(sessionKey, now);
 
     const stats = getVisitsStats();
     return res.json({
@@ -205,12 +224,15 @@ app.post("/api/visits/record", (req, res) => {
 // 2. Get real visits stats
 app.get("/api/visits", (req, res) => {
   try {
+    setNoCacheHeaders(res);
     const rawIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "127.0.0.1";
     const ipHash = hashIp(rawIp);
     const sessionId = (req.query.sessionId as string) || "anon";
+    const visitorId = req.query.visitorId as string | undefined;
     const isOwnerQuery = req.query.isOwner === "1" || req.query.isOwner === "true";
 
-    activeSessions.set(`${sessionId}_${ipHash}`, Date.now());
+    const activeKey = visitorId ? `v_${visitorId}` : `${sessionId}_${ipHash}`;
+    activeSessions.set(activeKey, Date.now());
 
     const stats = getVisitsStats();
     return res.json({
@@ -225,6 +247,7 @@ app.get("/api/visits", (req, res) => {
 // 3. Toggle owner exclusion for the current client
 app.post("/api/visits/toggle-owner", (req, res) => {
   try {
+    setNoCacheHeaders(res);
     const { exclude } = req.body || {};
     const stats = getVisitsStats();
     return res.json({
@@ -240,6 +263,7 @@ app.post("/api/visits/toggle-owner", (req, res) => {
 // 4. Test visit increment (for creator to verify counter in 1 click)
 app.post("/api/visits/test-increment", (req, res) => {
   try {
+    setNoCacheHeaders(res);
     const now = Date.now();
     const todayStr = new Date().toISOString().split("T")[0];
     visitsStore.totalVisits = (visitsStore.totalVisits || 0) + 1;
@@ -247,6 +271,7 @@ app.post("/api/visits/test-increment", (req, res) => {
       timestamp: now,
       dateStr: todayStr,
       ipHash: "manual_test",
+      visitorId: `test_${now}`,
       sessionId: `test_${now}`,
       isOwner: false
     });

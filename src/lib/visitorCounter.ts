@@ -13,15 +13,19 @@ export interface VisitorStats {
 }
 
 const STORAGE_KEY_EXCLUDE_OWNER = "graphostudio_exclude_owner";
+const STORAGE_KEY_VISITOR_ID = "graphostudio_visitor_id";
 const STORAGE_KEY_SESSION_ID = "graphostudio_session_id";
 const STORAGE_KEY_CACHED_STATS = "graphostudio_cached_visitor_stats";
-const STORAGE_KEY_CLEANUP_DONE = "graphostudio_owner_flag_cleared_v3";
+const STORAGE_KEY_CLEANUP_DONE = "graphostudio_owner_flag_cleared_v4";
 
-// One-time cleanup of legacy auto-exclusion that was mistakenly set on ais-dev/preview
+// Unique ID per browser page load (protects StrictMode double-mount while counting every real page visit/reload)
+const PAGE_LOAD_ID = `pl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+
 if (typeof window !== "undefined") {
   try {
     if (!localStorage.getItem(STORAGE_KEY_CLEANUP_DONE)) {
       localStorage.removeItem(STORAGE_KEY_EXCLUDE_OWNER);
+      localStorage.removeItem(STORAGE_KEY_CACHED_STATS);
       localStorage.setItem(STORAGE_KEY_CLEANUP_DONE, "true");
     }
   } catch {}
@@ -33,19 +37,11 @@ if (typeof window !== "undefined") {
  */
 export const isOwnerExcluded = (): boolean => {
   if (typeof window === "undefined") return false;
-
-  const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get("exclude_owner") === "true") {
-    localStorage.setItem(STORAGE_KEY_EXCLUDE_OWNER, "true");
-    return true;
-  }
-  if (urlParams.get("exclude_owner") === "false") {
-    localStorage.removeItem(STORAGE_KEY_EXCLUDE_OWNER);
+  try {
+    return localStorage.getItem(STORAGE_KEY_EXCLUDE_OWNER) === "true";
+  } catch {
     return false;
   }
-
-  const stored = localStorage.getItem(STORAGE_KEY_EXCLUDE_OWNER);
-  return stored === "true";
 };
 
 /**
@@ -53,34 +49,62 @@ export const isOwnerExcluded = (): boolean => {
  */
 export const setOwnerExcluded = (excluded: boolean): void => {
   if (typeof window === "undefined") return;
-  if (excluded) {
-    localStorage.setItem(STORAGE_KEY_EXCLUDE_OWNER, "true");
-  } else {
-    localStorage.removeItem(STORAGE_KEY_EXCLUDE_OWNER);
+  try {
+    if (excluded) {
+      localStorage.setItem(STORAGE_KEY_EXCLUDE_OWNER, "true");
+    } else {
+      localStorage.removeItem(STORAGE_KEY_EXCLUDE_OWNER);
+    }
+  } catch {}
+};
+
+/**
+ * Persistent unique browser/device visitor ID for accurate Unique Visitors count.
+ */
+export const getVisitorId = (): string => {
+  if (typeof window === "undefined") return "server-visitor";
+  try {
+    let visitorId = localStorage.getItem(STORAGE_KEY_VISITOR_ID);
+    if (!visitorId) {
+      visitorId = "v_" + Date.now().toString(36) + "_" + Math.random().toString(36).substring(2, 10);
+      localStorage.setItem(STORAGE_KEY_VISITOR_ID, visitorId);
+    }
+    return visitorId;
+  } catch {
+    return "anon_visitor";
   }
 };
 
 /**
- * Get or create a session ID for visit deduplication in the current browser session.
+ * Get or create a session ID for live active-user tracking.
  */
 export const getSessionId = (): string => {
   if (typeof window === "undefined") return "server-session";
-  let sessionId = sessionStorage.getItem(STORAGE_KEY_SESSION_ID);
-  if (!sessionId) {
-    sessionId = "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).substring(2, 9);
-    sessionStorage.setItem(STORAGE_KEY_SESSION_ID, sessionId);
+  try {
+    let sessionId = sessionStorage.getItem(STORAGE_KEY_SESSION_ID);
+    if (!sessionId) {
+      sessionId = "s_" + Date.now().toString(36) + "_" + Math.random().toString(36).substring(2, 9);
+      sessionStorage.setItem(STORAGE_KEY_SESSION_ID, sessionId);
+    }
+    return sessionId;
+  } catch {
+    return PAGE_LOAD_ID;
   }
-  return sessionId;
 };
 
 /**
- * Fetch latest visitor statistics from the backend server.
+ * Fetch latest visitor statistics from the backend server (bypassing all caches).
  */
 export const fetchVisitorStats = async (): Promise<VisitorStats> => {
   const isExcluded = isOwnerExcluded();
   const sessionId = getSessionId();
+  const visitorId = getVisitorId();
   try {
-    const res = await fetch(`/api/visits?isOwner=${isExcluded ? "1" : "0"}&sessionId=${encodeURIComponent(sessionId)}`);
+    const cacheBuster = Date.now();
+    const res = await fetch(
+      `/api/visits?isOwner=${isExcluded ? "1" : "0"}&sessionId=${encodeURIComponent(sessionId)}&visitorId=${encodeURIComponent(visitorId)}&_t=${cacheBuster}`,
+      { cache: "no-store" }
+    );
     if (!res.ok) throw new Error("Failed to fetch visit stats");
     const data = await res.json();
 
@@ -102,7 +126,7 @@ export const fetchVisitorStats = async (): Promise<VisitorStats> => {
     if (cached) {
       try {
         return { ...JSON.parse(cached), isOwnerExcluded: isExcluded };
-      } catch (e) {}
+      } catch {}
     }
     return {
       totalVisits: 1,
@@ -116,21 +140,25 @@ export const fetchVisitorStats = async (): Promise<VisitorStats> => {
 };
 
 /**
- * Records a visit on the server.
+ * Records a visit on the server for this page load.
  */
 export const recordRealVisit = async (language: string = "es", force: boolean = false): Promise<VisitorStats> => {
   const isExcluded = isOwnerExcluded();
   const sessionId = getSessionId();
+  const visitorId = getVisitorId();
 
   try {
     const res = await fetch("/api/visits/record", {
       method: "POST",
+      cache: "no-store",
       headers: {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
         isOwner: isExcluded,
         sessionId,
+        visitorId,
+        pageLoadId: force ? `force_${Date.now()}` : PAGE_LOAD_ID,
         language,
         force,
         referrer: typeof document !== "undefined" ? document.referrer : "",
@@ -166,6 +194,7 @@ export const recordTestVisit = async (): Promise<VisitorStats> => {
   try {
     const res = await fetch("/api/visits/test-increment", {
       method: "POST",
+      cache: "no-store",
       headers: { "Content-Type": "application/json" }
     });
     if (res.ok) {

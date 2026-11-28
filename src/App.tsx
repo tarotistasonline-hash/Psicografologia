@@ -486,23 +486,31 @@ export default function App() {
     fetchUserQuota().then((q) => setUserQuota(q));
   }, []);
 
-  // Record real visit on startup (respecting creator exclusion)
+  // Record visit on mount & poll live stats every 10 seconds + on tab focus
   useEffect(() => {
     recordRealVisit(language).then(stats => {
       setVisitorStats(stats);
     });
 
-    // Refresh real visits stats every 30 seconds
-    const interval = setInterval(() => {
+    const refreshStats = () => {
       fetchVisitorStats().then(stats => {
         setVisitorStats(stats);
       });
-    }, 30000);
+    };
+
+    const interval = setInterval(refreshStats, 10000);
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") {
+        refreshStats();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [language]);
+  }, []);
 
   const handleToggleOwnerExclusion = async (excluded: boolean) => {
     setOwnerExcluded(excluded);
